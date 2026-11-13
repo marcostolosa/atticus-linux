@@ -3949,6 +3949,10 @@ def user_content(task, shots=(), request=None):
 
 
 def main_delivery_required():
+    # The Linux shell delivers in the main overlay only (background agents are not wired there yet),
+    # so it sets ATTICUS_MAIN_ONLY to keep the model from handing tasks off to one that never runs.
+    if os.environ.get('ATTICUS_MAIN_ONLY') == '1':
+        return True
     # per-ask need only: the Drawings/Pointer settings being on must not block every agent hand-off (drawn/marked asks pass main_only themselves).
     # A text cursor alone only holds the move (run()): it is in a text box for most asks, and the model keeps drafts here itself.
     return bool(selection_context())

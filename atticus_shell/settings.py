@@ -1,7 +1,8 @@
-"""Read Atticus settings (shared with atticus.py and the Settings window).
+"""Read/write Atticus settings (shared with atticus.py and the Settings window).
 
-Settings live in ~/.config/atticus/settings.json. This is read-only here; the
-Settings UI writes them. Missing file / keys fall back to defaults.
+Settings live in ~/.config/atticus/settings.json. Reads fall back to defaults
+when the file or a key is missing; `set()` persists a single key so a spoken
+"turn X on/off" takes effect (the brain relays it as a validated "⚙" card).
 """
 from __future__ import annotations
 
@@ -24,3 +25,18 @@ def all() -> dict:
 
 def get(key: str, default=None):
     return all().get(key, default)
+
+
+def set(key: str, value) -> bool:
+    """Persist one setting, preserving the rest. Returns True on success."""
+    p = _path()
+    data = all()
+    data[key] = value
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        tmp.replace(p)   # atomic: a concurrent reader never sees half a file
+        return True
+    except OSError:
+        return False

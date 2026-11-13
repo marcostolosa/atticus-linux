@@ -1137,6 +1137,17 @@
       return true;
     },
     notice(s) { status(s, true); },
+    pickResolved() {   // a choice was answered by voice: the shell wrote it, so just clear the card
+      const d = $('thread').querySelector('.pk:not(.gone)'); if (!d) return;
+      $('thread').querySelectorAll('.q.reply').forEach(e => e.remove());
+      d.classList.add('gone'); follow(360); status('Picked', true); setState('solving');
+      setTimeout(() => { d.remove(); fit(); refoldIfAsked(); }, 360);
+    },
+    askResolved() {   // a permission/retry card answered by voice: clear it without re-posting
+      const d = $('thread').querySelector('.ok:not(.gone)'); if (!d) return;
+      d.classList.add('gone'); follow(360); setState('solving');
+      setTimeout(() => { d.remove(); fit(); refoldIfAsked(); }, 360);
+    },
     ask([q, cmd, retry, details]) {   // retry: a failure card (Not now / Retry) instead of an approval
       $('thread').querySelectorAll('.ok').forEach(e => e.remove()); unpin(); unstream();
       const d = document.createElement('div'); d.className = 'ok';

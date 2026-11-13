@@ -123,11 +123,18 @@ class Speaker:
         asr = str(_setting("asrLanguage", "auto")).lower()
         return _VOICE.get(asr, "en-us")
 
-    def speak(self, text: str, language: Optional[str] = None):
+    def speak(self, text: str, language: Optional[str] = None, done=None):
+        """Speak text. If `done` is given, it is called (on a worker thread) once
+        playback finishes or cannot start, so the caller can, for example, open
+        the mic to hear a reply only after the question has been read aloud."""
         if not self._engine or not self._enabled():
+            if done:
+                threading.Thread(target=done, daemon=True).start()
             return
         words = spoken(text)
         if not words:
+            if done:
+                threading.Thread(target=done, daemon=True).start()
             return
         self.stop()
         # The piper voice is pt-BR; read non-pt answers with espeak if we have it.
@@ -138,6 +145,20 @@ class Speaker:
             self._speak_piper(words)
         else:
             self._speak_espeak(words, language)
+        if done:
+            procs = list(self._procs)
+
+            def _watch():
+                for p in procs:
+                    try:
+                        p.wait()
+                    except Exception:
+                        pass
+                try:
+                    done()
+                except Exception:
+                    pass
+            threading.Thread(target=_watch, daemon=True).start()
 
     def _speak_piper(self, words: str):
         with self._lock:

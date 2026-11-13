@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""macOS `open` compatibility shim for Linux.
+
+The brain (atticus.py) and its AI client launch apps, URLs and files with
+macOS's `open` command. This shim gives that same interface on Hyprland/Linux:
+
+    open -a <App> [files...]   -> launch a desktop app by name (gtk-launch)
+    open -g ...                -> background launch (no special focus on Wayland)
+    open <url|file>            -> xdg-open
+
+Exit status mirrors success/failure so the brain's fallbacks still work.
+"""
+import configparser
+import glob
+import os
+import subprocess
+import sys
+
+APP_DIRS = [
+    os.path.expanduser("~/.local/share/applications"),
+    "/usr/share/applications",
+    "/usr/local/share/applications",
+    os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
+    "/var/lib/flatpak/exports/share/applications",
+]
+
+
+def find_desktop(name: str):
+    name_l = name.lower()
+    if name_l.endswith(".app"):
+        name_l = name_l[:-4]
+    partial = []
+    for d in APP_DIRS:
+        for f in sorted(glob.glob(os.path.join(d, "*.desktop"))):
+            base = os.path.basename(f)[:-8]
+            if base.lower() == name_l:
+                return base
+            try:
+                cp = configparser.ConfigParser(interpolation=None, strict=False)
+                cp.read(f, encoding="utf-8")
+                nm = cp.get("Desktop Entry", "Name", fallback="")
+            except Exception:
+                nm = ""
+            if nm.lower() == name_l:
+                return base
+            if name_l and name_l in nm.lower():
+                partial.append(base)
+    return partial[0] if partial else None
+
+
+def launch_app(app: str, files: list) -> int:
+    desktop = find_desktop(app)
+    if not desktop:
+        print(f"open: no application found for '{app}'", file=sys.stderr)
+        return 1
+    if _which("gtk-launch"):
+        return subprocess.run(["gtk-launch", desktop, *files]).returncode
+    for d in APP_DIRS:
+        p = os.path.join(d, desktop + ".desktop")
+        if os.path.exists(p) and _which("gio"):
+            return subprocess.run(["gio", "launch", p, *files]).returncode
+    return 1
+
+
+def open_target(t: str) -> int:
+    return subprocess.run(["xdg-open", t]).returncode
+
+
+def _which(x):
+    from shutil import which
+    return which(x)
+
+
+def main(argv) -> int:
+    app = None
+    files = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "-a" and i + 1 < len(argv):
+            app = argv[i + 1]; i += 2; continue
+        if a in ("-g", "-j", "-h", "-n", "-G", "-F", "-W", "-R", "--background", "--hide"):
+            i += 1; continue   # focus/background niceties the compositor owns
+        if a in ("-b", "-s", "-u", "--env", "--stdin", "--stdout", "--stderr", "--arch"):
+            i += 2; continue   # flags that take a value we don't need
+        if a.startswith("-") and a != "-":
+            i += 1; continue
+        files.append(a); i += 1
+    if app:
+        return launch_app(app, files)
+    if not files:
+        return 0
+    rc = 0
+    for t in files:
+        rc |= open_target(t)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

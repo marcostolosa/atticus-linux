@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtualenv / installed deps
+.venv/
+venv/
+
+# Upstream reference clone (has its own .git; pinned in README, not vendored)
+/upstream/
+
+# Models & caches (downloaded on build/first run)
+/models/
+*.onnx
+vosk-model-*/
+
+# Runtime / user data (must never be committed — may contain transcripts)
+*.log
+*.err
+/scratch/
+atticus.sock
+
+# OS / editor
+.DS_Store
+*.swp

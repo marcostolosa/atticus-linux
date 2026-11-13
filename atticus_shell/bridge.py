@@ -50,9 +50,11 @@ def _brain_env() -> dict:
 class Bridge:
     """Owns the running brain process for one ask and fans its output to the UI."""
 
-    def __init__(self, overlay, speak: Optional[Callable[[str], None]] = None):
+    def __init__(self, overlay, speak: Optional[Callable[[str], None]] = None,
+                 on_done: Optional[Callable[[], None]] = None):
         self.overlay = overlay
         self.speak = speak or (lambda text: None)
+        self.on_done = on_done or (lambda: None)
         self.proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
 
@@ -142,4 +144,9 @@ class Bridge:
             self.proc = None
         if proc.returncode and not answer_spoken:
             self.overlay.call("msg", "")
+        try:
+            self.on_done()
+        except Exception:
+            import traceback
+            traceback.print_exc()
         return False

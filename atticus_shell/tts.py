@@ -15,8 +15,10 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-# espeak-ng language codes for the UI languages Atticus supports.
-_VOICE = {"en": "en", "it": "it", "es": "es", "fr": "fr", "de": "de"}
+# Map detected/UI language codes to espeak-ng voices. pt-BR and en-US are the
+# primary targets; others kept from the macOS UI language set.
+_VOICE = {"en": "en-us", "pt": "pt-br", "pt-br": "pt-br",
+          "it": "it", "es": "es", "fr": "fr", "de": "de"}
 
 
 def spoken(answer: str) -> str:
@@ -50,22 +52,32 @@ class Speaker:
             s = {}
         return bool(s.get("speak", True))   # default on, like the Mac read-aloud
 
-    def _language(self) -> str:
+    def _language(self, override: Optional[str] = None) -> str:
+        if override:
+            key = override.lower()
+            if key in _VOICE:
+                return _VOICE[key]
         p = Path(os.environ.get("ATTICUS_DIR", Path.home() / ".config/atticus")) / "settings.json"
         try:
-            lang = (json.loads(p.read_text()).get("uiLanguage") or "").lower()
+            s = json.loads(p.read_text())
         except (OSError, ValueError):
-            lang = ""
-        return _VOICE.get(lang, "en")
+            s = {}
+        lang = (s.get("uiLanguage") or "").lower()
+        if lang in _VOICE:
+            return _VOICE[lang]
+        # Fall back to the configured ASR language when it's a concrete one
+        # (this install pins pt -> pt-br); otherwise a neutral default.
+        asr = str(s.get("asrLanguage", "auto")).lower()
+        return _VOICE.get(asr, "en-us")
 
-    def speak(self, text: str):
+    def speak(self, text: str, language: Optional[str] = None):
         if not self._engine or not self._enabled():
             return
         words = spoken(text)
         if not words:
             return
         self.stop()
-        voice = self._language()
+        voice = self._language(language)
         with self._lock:
             try:
                 self._proc = subprocess.Popen(

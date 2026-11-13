@@ -25,3 +25,6 @@ atticus.sock
 # OS / editor
 .DS_Store
 *.swp
+
+# Wake-word probe recordings (voice data, never commit)
+/tools/wake_clips/

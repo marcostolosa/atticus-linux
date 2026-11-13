@@ -19,6 +19,8 @@ from typing import Optional
 
 import numpy as np
 
+from .settings import get as _setting
+
 SAMPLE_RATE = 16000
 
 
@@ -105,8 +107,17 @@ class Transcriber:
     """faster-whisper, loaded lazily and kept warm."""
 
     def __init__(self, model_size: Optional[str] = None, language: Optional[str] = None):
-        self.model_size = model_size or os.environ.get("ATTICUS_WHISPER_MODEL", "base")
-        self.language = language
+        # "small" is multilingual and noticeably better at pt-BR than "base",
+        # while staying fast with int8 on CPU.
+        self.model_size = model_size or os.environ.get("ATTICUS_WHISPER_MODEL", "small")
+        # Language is configurable (public repo): "auto" detects per utterance,
+        # or pin it (e.g. "pt", "en") to remove detection errors on short clips
+        # and decode that language far better. Default auto so any user is served;
+        # this install pins pt in settings.json for best Brazilian-Portuguese.
+        if language is None:
+            language = _setting("asrLanguage", "auto")
+        self.language = None if str(language).lower() == "auto" else language
+        self.last_language: Optional[str] = None  # language used for the last utterance
         self._model = None
         self._lock = threading.Lock()
 
@@ -127,7 +138,9 @@ class Transcriber:
         if audio.size < SAMPLE_RATE // 4:   # < 0.25s: nothing useful was said
             return ""
         self.load()
-        segments, _ = self._model.transcribe(
+        segments, info = self._model.transcribe(
             audio, language=language or self.language, vad_filter=True,
             beam_size=1, condition_on_previous_text=False)
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        self.last_language = getattr(info, "language", None)
+        return text

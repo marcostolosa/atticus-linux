@@ -46,11 +46,14 @@ def main():
     gi.require_version("Gtk", "4.0")
     from gi.repository import Gio, GLib, Gtk
 
+    import time
     from .overlay import Overlay
     from .bridge import Bridge
     from .control import ControlServer
     from .speech import Recorder, Transcriber
     from .tts import Speaker
+    from .wakeword import WakeListener
+    from . import settings as cfg
 
     app = Gtk.Application(application_id="com.atticus.app",
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
@@ -80,6 +83,10 @@ def main():
             self.app = app
             self.listening = False
             self._level_source = 0
+            self._wake_session = False
+            self._speech_seen = False
+            self._silence_since = 0.0
+            self._listen_started = 0.0
             # Bring the hotkey socket up first so it's ready before WebKit finishes init.
             self.control = ControlServer(self._on_control)
             self.control.start()
@@ -87,8 +94,25 @@ def main():
             self.recorder = Recorder()
             self.transcriber = Transcriber()
             self.speaker = Speaker()
-            self.bridge = Bridge(self.overlay, speak=self.speaker.speak)
+            # Speak each answer in the language the user just spoke (pt-BR / en-US).
+            self.bridge = Bridge(
+                self.overlay,
+                speak=lambda text: self.speaker.speak(text, self.transcriber.last_language),
+                on_done=self._on_done)
             self.transcriber.warm()
+
+            # Wake word ("Atticus"), like Alexa — always listening, off by default.
+            self.wake = None
+            if cfg.get("wake", False):
+                word = cfg.get("wakeWord") or "atticus"
+                self.wake = WakeListener(self._on_wake, word=word)
+                if self.wake.available():
+                    self.wake.start()
+                    print(f"[atticus] wake word on: say '{word}'", flush=True)
+                else:
+                    print("[atticus] wake word enabled but Vosk model missing; run build.sh", flush=True)
+                    self.wake = None
+
             # Hold the app alive without a visible window until the hotkey fires.
             self._hold = Gio.Application.hold(app)
             self.overlay.window.set_visible(False)
@@ -122,21 +146,50 @@ def main():
                     "cardRect: JSON.stringify(document.getElementById('card')?.getBoundingClientRect())"
                     "}))")
 
-        def _begin_listen(self):
+        def _on_wake(self):
+            # Ignore the keyword while already listening or mid-answer.
+            if self.listening or self.bridge.running():
+                return
+            self._begin_listen(wake=True)
+
+        def _begin_listen(self, wake=False):
             if self.listening:
                 return
+            if self.wake:
+                self.wake.pause()   # don't let the spotter fight the command mic
             self.overlay.present()
             if not self.recorder.start():
                 self.overlay.call("msg", "No microphone available.")
+                self._resume_wake()
                 return
             self.listening = True
+            self._wake_session = wake
+            self._speech_seen = False
+            self._silence_since = 0.0
+            self._listen_started = time.monotonic()
             self.overlay.call("listen")        # creates a fresh voice turn (q/steps/answer)
             self._level_source = GLib.timeout_add(60, self._tick_level)
 
         def _tick_level(self):
             if not self.listening:
                 return False
-            self.overlay.call("level", round(self.recorder.level, 3))
+            level = self.recorder.level
+            self.overlay.call("level", round(level, 3))
+            # Wake-word sessions have no key release, so end on a trailing silence.
+            if self._wake_session:
+                now = time.monotonic()
+                if level > 0.07:
+                    self._speech_seen = True
+                    self._silence_since = 0.0
+                elif self._speech_seen:
+                    if not self._silence_since:
+                        self._silence_since = now
+                    elif now - self._silence_since > 1.3:
+                        self._end_listen()
+                        return False
+                if now - self._listen_started > 15:   # hard cap
+                    self._end_listen()
+                    return False
             return True
 
         def _end_listen(self):
@@ -163,11 +216,20 @@ def main():
             text = (text or "").strip()
             if not text:
                 self.overlay.call("msg", "")
+                self._resume_wake()   # nothing heard: go back to waiting for the keyword
                 return False
             # the voice turn already exists (from ui.listen()); fill it and run.
             self.overlay.call("words", text)
             self._start_brain(text)
             return False
+
+        def _on_done(self):
+            # The answer finished streaming; start listening for the keyword again.
+            self._resume_wake()
+
+        def _resume_wake(self):
+            if self.wake and not self.listening and not self.bridge.running():
+                self.wake.resume()
 
         def _submit_typed(self, text):
             # a typed/relayed ask has no turn yet: create one (keep box open), then run.
@@ -193,6 +255,7 @@ def main():
             self.speaker.stop()
             self.bridge.cancel()
             self.overlay.call("stopped", "")
+            self._resume_wake()
 
         # --- overlay page -> shell ----------------------------------------
         def _on_message(self, body):

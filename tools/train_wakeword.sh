@@ -44,10 +44,14 @@ MSG
   exit 1
 fi
 
+# LiveKit Cloud free plan limits concurrent TTS; 5 (the default) hits HTTP 429.
+# Keep it low (2) so synthesis doesn't rate-limit. Override: WAKE_CONCURRENCY=3 bash ...
+CONC="${WAKE_CONCURRENCY:-2}"
+
 train() {   # $1 = phrase, $2 = expected onnx basename (phrase with spaces->_), rest = extra setup flags
   local phrase="$1" name="$2"; shift 2
-  echo "== training '$phrase' =="
-  livekit-wakeword setup --wakeword "$phrase" --language pt "$@" --eval
+  echo "== training '$phrase' (TTS concurrency=$CONC) =="
+  livekit-wakeword setup --wakeword "$phrase" --language pt --concurrency "$CONC" "$@" --eval
   livekit-wakeword train --wakeword "$phrase" --out ./models
   # the output is named after the phrase (spaces -> underscores)
   livekit-wakeword eval  --wakeword "$phrase" --model "./models/${name}.onnx" 2>/dev/null \

@@ -95,6 +95,14 @@ def main():
             # of running a discarded command or discarding a fresh one.
             self._gen = 0
             self._speak_gen = 0
+            # Hide-for-screenshot bookkeeping: a helper process (cli.py, run
+            # by the brain for --look/--text) asks the running shell to hide
+            # its own overlay for the moment of a grim capture, so a screen
+            # read never sees Atticus's own box. Nested/overlapping requests
+            # (depth) restore to whatever the box's visibility actually was
+            # before the first one, not to a hardcoded "show".
+            self._capture_depth = 0
+            self._pre_capture_visible = False
             # True while an answer is actually being read aloud (TTS playback in
             # flight), independent of whether the brain process has exited — the
             # brain usually exits right after printing the final answer, well
@@ -181,6 +189,15 @@ def main():
                 self._submit_typed(arg)
             elif cmd == "ping":
                 pass
+            elif cmd == "hide-for-capture":
+                if self._capture_depth == 0:
+                    self._pre_capture_visible = self.overlay.window.get_visible()
+                self._capture_depth += 1
+                self.overlay.window.set_visible(False)
+            elif cmd == "show-after-capture":
+                self._capture_depth = max(0, self._capture_depth - 1)
+                if self._capture_depth == 0:
+                    self.overlay.window.set_visible(self._pre_capture_visible)
             elif cmd == "probe":
                 self.overlay.eval_js(
                     "console.log('PROBE ' + JSON.stringify({"

@@ -7,20 +7,23 @@ one-file launcher (bin/atticus-native) execs `python3 -m atticus_shell.cli`.
 v1 implements the commands the core loop needs:
   --screens                      JSON [[name,x,y,w,h,builtin], ...] (main first)
   --look <n> <out.jpg> [winid]   screenshot display n (1-based), ~1280px wide JPEG
-  --text <app> [title]           window text (unavailable on Wayland -> empty)
+  --text <app> [title]           OCR of that window's region (grim + tesseract)
 Everything else exits non-zero; the brain already degrades gracefully.
 """
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 
 
 def monitors() -> list[dict]:
-    """Hyprland monitors in a stable order: focused first, then by id.
-
-    Returns dicts with logical name/x/y/w/h and a built_in guess.
+    """Hyprland monitors in a stable order: the built-in panel first (if any),
+    then by id — never by current focus, which can change between one call
+    and the next (see look(), which is called once per monitor using indices
+    resolved by an earlier, separate call to this same list).
     """
     try:
         raw = subprocess.run(["hyprctl", "-j", "monitors"],
@@ -45,7 +48,7 @@ def monitors() -> list[dict]:
             "id": m.get("id", 0),
         }
     mons = [logical(m) for m in mons if isinstance(m, dict)]
-    mons.sort(key=lambda m: (not m["focused"], m["id"]))
+    mons.sort(key=lambda m: (not m["built_in"], m["id"]))
     return mons
 
 
@@ -55,24 +58,156 @@ def screens_json() -> int:
     return 0
 
 
+# --- hiding Atticus's own overlay around a capture --------------------------
+def _hide_for_capture() -> None:
+    # Best-effort: if the shell isn't reachable, there's nothing to hide.
+    # Keep this fast (no retry loop) so a missing shell never stalls a
+    # screenshot the brain is waiting on.
+    from . import control
+    control.send("hide-for-capture", retries=1, delay=0)
+
+
+def _show_after_capture() -> None:
+    from . import control
+    control.send("show-after-capture", retries=1, delay=0)
+
+
 def look(idx: int, out: str, _winid: str | None = None) -> int:
     mons = monitors()
     if not (1 <= idx <= len(mons)):
         return 1
     name = mons[idx - 1]["name"]
-    # grim one output to PNG on stdout, then scale to <=1280px wide JPEG via ffmpeg.
+    # Atticus's own box sits in a layer-shell OVERLAY surface above every
+    # window, so a plain screenshot would capture it too. Hide it first (it
+    # is restored right after, success or failure) so the model's picture
+    # shows only what the user actually has on screen.
+    _hide_for_capture()
     try:
-        grim = subprocess.run(["grim", "-o", name, "-t", "png", "-"],
-                              capture_output=True, timeout=15)
-        if grim.returncode != 0 or not grim.stdout:
+        # grim one output to PNG on stdout, then scale to <=1280px wide JPEG via ffmpeg.
+        try:
+            grim = subprocess.run(["grim", "-o", name, "-t", "png", "-"],
+                                  capture_output=True, timeout=15)
+            if grim.returncode != 0 or not grim.stdout:
+                return 1
+            ff = subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", "pipe:0",
+                 "-vf", "scale='min(1280,iw)':-1", "-q:v", "5", out],
+                input=grim.stdout, capture_output=True, timeout=20)
+            return 0 if ff.returncode == 0 else 1
+        except Exception:
             return 1
-        ff = subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", "pipe:0",
-             "-vf", "scale='min(1280,iw)':-1", "-q:v", "5", out],
-            input=grim.stdout, capture_output=True, timeout=20)
-        return 0 if ff.returncode == 0 else 1
+    finally:
+        _show_after_capture()
+
+
+# --- window lookup (for --text) ---------------------------------------------
+def _clients() -> list[dict]:
+    try:
+        raw = subprocess.run(["hyprctl", "-j", "clients"],
+                             capture_output=True, text=True, timeout=5).stdout
+        rows = json.loads(raw or "[]")
+        return [r for r in rows if isinstance(r, dict)]
     except Exception:
-        return 1
+        return []
+
+
+def _active_window() -> dict | None:
+    try:
+        raw = subprocess.run(["hyprctl", "-j", "activewindow"],
+                             capture_output=True, text=True, timeout=5).stdout
+        w = json.loads(raw or "{}")
+        return w if isinstance(w, dict) and w.get("class") else None
+    except Exception:
+        return None
+
+
+def find_window(app: str, title_words: str = "") -> dict | None:
+    """Best matching mapped, visible window for `app` (a window class, as
+    front() reports it on Linux) and optional title words. No app: the
+    active window. Several windows of the same app: prefer one whose title
+    matches the given words, then the most recently focused."""
+    app = (app or "").strip()
+    if not app:
+        return _active_window()
+    candidates = [c for c in _clients()
+                 if c.get("mapped") and not c.get("hidden") and c.get("class")]
+    al = app.lower()
+    exact = [c for c in candidates if c["class"].lower() == al]
+    pool = exact or [c for c in candidates
+                     if al in c["class"].lower() or c["class"].lower() in al]
+    if not pool:
+        return None
+    words = [w for w in title_words.lower().split() if w]
+    if words:
+        def score(c):
+            t = str(c.get("title", "")).lower()
+            return sum(1 for w in words if w in t)
+        best = max(score(c) for c in pool)
+        if best > 0:
+            pool = [c for c in pool if score(c) == best]
+    pool.sort(key=lambda c: c.get("focusHistoryID", 1 << 30))
+    return pool[0]
+
+
+def _ocr_langs() -> str | None:
+    """Pick installed language packs for tesseract: prefer Portuguese and
+    English together (most of this port's users), fall back to whichever of
+    those two is actually installed, else let tesseract use its own default
+    rather than fail outright on a system with only one pack."""
+    try:
+        out = subprocess.run(["tesseract", "--list-langs"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return None
+    installed = set(out.splitlines()[1:]) if out else set()
+    wanted = [l for l in ("por", "eng") if l in installed]
+    return "+".join(wanted) if wanted else None
+
+
+def text_ocr(app: str, title: str = "") -> int:
+    """OCR of one window's visible region: find it, screenshot just that
+    rectangle (Atticus's own box hidden for the moment), run tesseract. Empty
+    output (rc 0) on anything we can't do — the brain already treats that as
+    "no text found" and tries another way."""
+    win = find_window(app, title)
+    if not win:
+        return 0
+    at, size = win.get("at"), win.get("size")
+    if not (isinstance(at, list) and isinstance(size, list) and len(at) == 2 and len(size) == 2):
+        return 0
+    x, y = at
+    w, h = size
+    if w <= 0 or h <= 0:
+        return 0
+    fd, path = tempfile.mkstemp(prefix="atticus-ocr-", suffix=".png")
+    os.close(fd)
+    _hide_for_capture()
+    try:
+        grim = subprocess.run(["grim", "-g", f"{x},{y} {w}x{h}", "-t", "png", path],
+                              capture_output=True, timeout=15)
+        if grim.returncode != 0:
+            return 0
+        # tesseract's CLI is strictly `imagename outputbase [options]`: every
+        # option, including -l, must come after both positional arguments
+        # (path, then "-" for stdout) or tesseract misparses them.
+        cmd = ["tesseract", path, "-"]
+        langs = _ocr_langs()
+        if langs:
+            cmd += ["-l", langs]
+        cmd += ["--psm", "6"]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        text = r.stdout.strip()
+        if text:
+            print(text)
+        return 0
+    except Exception:
+        return 0
+    finally:
+        _show_after_capture()
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def main(argv: list[str]) -> int:
@@ -88,8 +223,9 @@ def main(argv: list[str]) -> int:
             return 2
         return look(idx, argv[2], argv[3] if len(argv) > 3 else None)
     if cmd == "--text":
-        # No accessibility window-text read on Wayland yet: empty -> brain uses OCR.
-        return 0
+        app = argv[1] if len(argv) > 1 else ""
+        title = argv[2] if len(argv) > 2 else ""
+        return text_ocr(app, title)
     if cmd == "control" and len(argv) >= 2:
         from . import control
         rest = " ".join(argv[1:])

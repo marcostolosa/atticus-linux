@@ -169,17 +169,35 @@ class WakeListener:
         chunk = 1280 * 2   # 80 ms frame (FRAME_SAMPLES * int16)
         dbg = bool(os.environ.get("ATTICUS_DEBUG"))
         peak, hb_t = 0.0, time.monotonic()
+        empty_reads = 0
         self._proc = self._spawn()
         while self._running:
-            if self._paused or not self._proc:
+            # Take a local reference: pause() may set self._proc = None from
+            # another thread between this check and the read below, but the
+            # Popen object we already hold stays valid to read from (it just
+            # returns EOF), so this never dereferences None.
+            proc = self._proc
+            if self._paused or proc is None:
                 time.sleep(0.1)
-                if not self._paused and not self._proc:
+                if not self._paused and self._proc is None:
                     self._proc = self._spawn()
+                empty_reads = 0
                 continue
-            data = self._proc.stdout.read(chunk)
+            try:
+                data = proc.stdout.read(chunk)
+            except (OSError, ValueError):
+                data = b""
             if not data:
-                time.sleep(0.02)
+                # EOF: parecord exited (PipeWire restart, mic unplugged, the
+                # machine resumed from suspend, ...). Reading a dead pipe
+                # returns b"" forever, so without this the wake word would
+                # stay silently dead until the service is restarted by hand.
+                empty_reads += 1
+                if proc.poll() is not None and proc is self._proc:
+                    self._proc = None
+                time.sleep(min(0.5, 0.02 * empty_reads))
                 continue
+            empty_reads = 0
             samples = np.frombuffer(data, dtype=np.int16)
             try:
                 scores = self._lk.predict(samples)
@@ -202,18 +220,33 @@ class WakeListener:
         speech, seg, silence = False, bytearray(), 0
         dbg = bool(os.environ.get("ATTICUS_DEBUG"))
         hb_n, hb_max, hb_t = 0, 0.0, time.monotonic()
+        empty_reads = 0
         self._proc = self._spawn()
         while self._running:
-            if self._paused or not self._proc:
+            # See _loop_livekit: hold a local reference so a concurrent
+            # pause() (which sets self._proc = None) can't make this
+            # dereference None.
+            proc = self._proc
+            if self._paused or proc is None:
                 time.sleep(0.1)
-                if not self._paused and not self._proc:
+                if not self._paused and self._proc is None:
                     self._proc = self._spawn()
                 speech, seg, silence = False, bytearray(), 0
+                empty_reads = 0
                 continue
-            data = self._proc.stdout.read(frame)
+            try:
+                data = proc.stdout.read(frame)
+            except (OSError, ValueError):
+                data = b""
             if not data:
-                time.sleep(0.02)
+                # EOF: the recorder died. Respawn it instead of spinning on a
+                # closed pipe forever (see _loop_livekit for the same fix).
+                empty_reads += 1
+                if proc.poll() is not None and proc is self._proc:
+                    self._proc = None
+                time.sleep(min(0.5, 0.02 * empty_reads))
                 continue
+            empty_reads = 0
             s = np.frombuffer(data, dtype=np.int16)
             rms = float(np.sqrt(np.mean((s.astype(np.float32) / 32768.0) ** 2))) if s.size else 0.0
             if dbg:
@@ -280,12 +313,16 @@ class WakeListener:
 
     def pause(self):
         self._paused = True
-        if self._proc:
+        # Swap to a local reference before acting on it: the loop thread reads
+        # self._proc without a lock, so clearing it first (then terminating
+        # the local reference) avoids a window where self._proc is non-None
+        # but already closing under it.
+        proc, self._proc = self._proc, None
+        if proc:
             try:
-                self._proc.terminate()
+                proc.terminate()
             except Exception:
                 pass
-            self._proc = None
 
     def resume(self):
         if self._lk is not None:

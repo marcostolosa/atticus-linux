@@ -144,7 +144,12 @@ class Bridge:
             line = raw.rstrip("\n")
             if not line:
                 continue
-            GLib.idle_add(self._dispatch, line, answer_spoken)
+            # Tag each queued callback with the process that produced it: ask()
+            # may already have cancelled this proc and started a new one before
+            # this line is dispatched on the main thread, and a stale line must
+            # never render/speak into the new ask's turn or overwrite its
+            # pending card's answer file.
+            GLib.idle_add(self._dispatch, proc, line, answer_spoken)
         proc.wait()
         GLib.idle_add(self._finished, proc, answer_spoken)
 
@@ -154,7 +159,9 @@ class Bridge:
         for raw in proc.stderr:
             sys.stderr.write("[brain] " + raw)
 
-    def _dispatch(self, line: str, answer_spoken: list) -> bool:
+    def _dispatch(self, proc: subprocess.Popen, line: str, answer_spoken: list) -> bool:
+        if proc is not self.proc:
+            return False   # superseded by a newer ask; drop this stale line
         tag = line[:1]
         rest = line[2:] if len(line) > 1 and line[1] == " " else line[1:]
         try:
@@ -226,8 +233,14 @@ class Bridge:
             traceback.print_exc()
 
     def _finished(self, proc, answer_spoken) -> bool:
-        if proc is self.proc:
-            self.proc = None
+        if proc is not self.proc:
+            # This proc was already cancelled/superseded (ask() or cancel()
+            # moved self.proc on). Its own cancel/ask call already cleared
+            # pending state and will own on_done() for whatever replaced it;
+            # finishing late must not wipe the new ask's pending card answer
+            # file or fire on_done() (wake/auto-hide) out of turn.
+            return False
+        self.proc = None
         self._clear_pending()
         if proc.returncode and not answer_spoken:
             self.overlay.call("msg", "")

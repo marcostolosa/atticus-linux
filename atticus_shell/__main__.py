@@ -89,6 +89,17 @@ def main():
             self._speech_seen = False
             self._silence_since = 0.0
             self._listen_started = 0.0
+            # Bumped at the start of every recording session (and on cancel) so
+            # a transcription that finishes after the session it belongs to was
+            # superseded or cancelled is recognized as stale and dropped instead
+            # of running a discarded command or discarding a fresh one.
+            self._gen = 0
+            self._speak_gen = 0
+            # True while an answer is actually being read aloud (TTS playback in
+            # flight), independent of whether the brain process has exited — the
+            # brain usually exits right after printing the final answer, well
+            # before playback finishes.
+            self._speaking = False
             # Hands-free answering of an interactive card (choice / permission).
             self._answering = False
             self._prompt = None          # {"kind": "pick"|"perm", ...}
@@ -107,7 +118,7 @@ def main():
             # Speak each answer in the language the user just spoke (pt-BR / en-US).
             self.bridge = Bridge(
                 self.overlay,
-                speak=lambda text: self.speaker.speak(text, self.transcriber.last_language),
+                speak=self._speak_answer,
                 on_done=self._on_done,
                 on_prompt=self._on_prompt)
             self.transcriber.warm()
@@ -194,6 +205,16 @@ def main():
         def _begin_listen(self, wake=False):
             if self.listening:
                 return
+            # Barge-in: starting a new recording interrupts whatever Atticus is
+            # doing right now — speaking an answer, or waiting on an interactive
+            # card from a now-abandoned ask — so the mic never records its own
+            # voice and no stale card state corrupts the next voice turn.
+            self.speaker.stop()
+            if self.bridge.running():
+                self.bridge.cancel()
+            self._answering = False
+            self._prompt = None
+            self._gen += 1
             if self.wake:
                 self.wake.pause()   # don't let the spotter fight the command mic
             self._cancel_autohide()
@@ -206,6 +227,7 @@ def main():
             if not self.recorder.start():
                 self.overlay.call("msg", "No microphone available.")
                 self._resume_wake()
+                self._schedule_autohide()
                 return
             self.listening = True
             self._wake_session = wake
@@ -257,45 +279,93 @@ def main():
                     return False
             return True
 
-        def _end_listen(self):
+        def _stop_recording(self):
+            """Stop the mic and level ticker, if running. Returns the captured
+            audio (or None). Shared by every path that tears down a recording
+            session, so they can never disagree about `listening`/the timer."""
             if not self.listening:
-                return
+                return None
             self.listening = False
             if self._level_source:
                 GLib.source_remove(self._level_source)
                 self._level_source = 0
-            audio = self.recorder.stop()
+            try:
+                return self.recorder.stop()
+            except Exception:
+                return None
+
+        def _end_listen(self):
+            if not self.listening:
+                return
+            answering = self._answering
+            gen = self._gen   # this session's generation; _begin_listen/_cancel bump it
+            audio = self._stop_recording()
             self.earcons.play("end")     # falling blip: "got it"
-            if self._answering:
-                threading.Thread(target=self._transcribe_answer, args=(audio,),
+            if answering:
+                threading.Thread(target=self._transcribe_answer, args=(audio, gen),
                                  daemon=True).start()
                 return
             self.overlay.call("think")
-            threading.Thread(target=self._transcribe_and_run, args=(audio,), daemon=True).start()
+            threading.Thread(target=self._transcribe_and_run, args=(audio, gen), daemon=True).start()
 
-        def _transcribe_and_run(self, audio):
+        def _transcribe_and_run(self, audio, gen):
             try:
                 text = self.transcriber.transcribe(audio)
             except Exception:
                 import traceback
                 traceback.print_exc()
                 text = ""
-            GLib.idle_add(self._after_transcribe, text)
+            GLib.idle_add(self._after_transcribe, text, gen)
 
-        def _after_transcribe(self, text):
+        def _after_transcribe(self, text, gen):
+            if gen != self._gen:
+                return False   # superseded by a newer session or a cancel; drop it
             text = (text or "").strip()
             if not text:
                 self.overlay.call("msg", "")
                 self._resume_wake()   # nothing heard: go back to waiting for the keyword
+                self._schedule_autohide()
                 return False
             # the voice turn already exists (from ui.listen()); fill it and run.
             self.overlay.call("words", text)
             self._start_brain(text)
             return False
 
+        def _speak_answer(self, text):
+            # The final answer: speak it, and hold off on resuming the wake
+            # word / arming auto-hide until playback actually finishes — the
+            # brain process usually exits right after printing this line,
+            # well before the audio is done, so doing it on process-exit alone
+            # would open the mic (and risk hiding the box) over Atticus's own
+            # voice.
+            self._speaking = True
+            self._speak_gen = self._gen   # tag this playback to the current turn
+            self.speaker.speak(text, self.transcriber.last_language,
+                               done=self._on_speech_done)
+
+        def _on_speech_done(self):
+            # Runs on the TTS watcher thread; hop back to the GLib main thread.
+            GLib.idle_add(self._speech_finished)
+
+        def _speech_finished(self):
+            self._speaking = False
+            if self._speak_gen != self._gen:
+                # A cancel or a new _begin_listen happened while this answer
+                # was still playing; that call already did its own wake/hide
+                # handling, so finishing late must not redo or override it
+                # (it would otherwise re-arm auto-hide on top of a new turn).
+                return False
+            if not self.bridge.running():
+                self._resume_wake()
+                self._schedule_autohide()
+            return False
+
         def _on_done(self):
-            # The answer finished streaming; start listening for the keyword again
-            # and let the box fade away on its own after a reading pause.
+            # The brain process exited. If its answer is still being read
+            # aloud, let _speech_finished() do the wake/auto-hide handoff
+            # once playback actually ends.
+            if self._speaking:
+                return
             self._resume_wake()
             self._schedule_autohide()
 
@@ -310,7 +380,8 @@ def main():
 
         def _autohide(self):
             self._autohide_source = 0
-            if not self.listening and not self.bridge.running():
+            if (not self.listening and not self.bridge.running()
+                    and not self._speaking and not self._prompt):
                 self.overlay.hide()
             return False
 
@@ -334,15 +405,10 @@ def main():
             self.bridge.ask(text, front_app=front)
 
         def _cancel(self):
-            self.listening = False
-            if self._level_source:
-                GLib.source_remove(self._level_source)
-                self._level_source = 0
-            try:
-                self.recorder.stop()
-            except Exception:
-                pass
+            self._gen += 1   # invalidate any transcription still in flight
+            self._stop_recording()
             self.speaker.stop()
+            self._speaking = False
             self._answering = False
             self._prompt = None
             self.bridge.cancel()
@@ -401,6 +467,7 @@ def main():
             # Open the mic to hear the answer to the pending card.
             if not self._prompt or self.listening or not self.bridge.running():
                 return False
+            self._gen += 1
             if self.wake:
                 self.wake.pause()
             if not self.recorder.start():
@@ -418,33 +485,28 @@ def main():
 
         def _stop_answer_listen(self):
             # A panel click (or giving up) ends any in-flight answer listen.
-            if self.listening and self._answering:
-                self.listening = False
-                if self._level_source:
-                    GLib.source_remove(self._level_source)
-                    self._level_source = 0
-                try:
-                    self.recorder.stop()
-                except Exception:
-                    pass
+            self._stop_recording()
             self._answering = False
             self._prompt = None
             self.speaker.stop()
 
-        def _transcribe_answer(self, audio):
+        def _transcribe_answer(self, audio, gen):
             try:
                 text = self.transcriber.transcribe(audio)
             except Exception:
                 import traceback
                 traceback.print_exc()
                 text = ""
-            GLib.idle_add(self._resolve_prompt, text)
+            GLib.idle_add(self._resolve_prompt, text, gen)
 
-        def _resolve_prompt(self, text):
+        def _resolve_prompt(self, text, gen):
+            if gen != self._gen:
+                return False   # superseded by a newer session or a cancel; drop it
             self._answering = False
             p = self._prompt
             if not p or not self.bridge.running():
                 self._resume_wake()
+                self._schedule_autohide()
                 return False
             value = self._match_answer(p, (text or "").strip())
             if value is None:
@@ -463,6 +525,16 @@ def main():
             self._prompt = None
             return False
 
+        # Portuguese/English function words, excluded from the fuzzy choice
+        # match below so a reply and an option label never "match" on nothing
+        # but an article or preposition they both happen to contain.
+        _STOPWORDS = {
+            "a", "o", "os", "as", "de", "da", "do", "das", "dos", "e", "é",
+            "um", "uma", "uns", "umas", "no", "na", "nos", "nas", "por",
+            "para", "com", "que", "se", "ao", "aos", "à", "às", "em", "ou",
+            "mas", "the", "a", "of", "to", "is", "it", "and", "or", "in",
+        }
+
         def _match_answer(self, p, text):
             # Map a spoken reply to a card answer, or None when it is unclear.
             import re
@@ -478,10 +550,14 @@ def main():
                     "outra", "outra coisa", "none", "nada disso"}
             words = set(t.split())
             if p["kind"] == "perm":
-                if words & yes or t in yes:
-                    return "r" if p.get("retry") else "y"
+                # Check "no" first: a negative reply ("não pode", "claro que
+                # não", "ok, não") contains a yes-word too, and must not be
+                # read as approval just because "pode"/"claro"/"ok" also
+                # matched.
                 if words & no or t in no:
                     return "n"
+                if words & yes or t in yes:
+                    return "r" if p.get("retry") else "y"
                 return None
             # choice card
             if t in none or words & none:
@@ -501,11 +577,14 @@ def main():
             for w in words:
                 if w in ordinals and ordinals[w] < len(opts):
                     return str(ordinals[w])
-            # Fuzzy: the option whose label shares the most words with the reply.
+            # Fuzzy: the option whose label shares the most content words
+            # (stopwords excluded) with the reply.
+            content = words - self._STOPWORDS
             best, best_score = None, 0
             for i, o in enumerate(opts):
                 label = set(re.sub(r"[^\w\s]", " ", self._plain(o).lower()).split())
-                score = len(label & words)
+                label -= self._STOPWORDS
+                score = len(label & content)
                 if score > best_score:
                     best, best_score = i, score
             if best is not None and best_score >= 1:
@@ -535,16 +614,16 @@ def main():
             if "send" in body and isinstance(body["send"], str):
                 self._submit_typed(body["send"])
             if body.get("type"):
-                # user started typing: drop a live mic without sending
-                if self.listening:
-                    self.listening = False
-                    if self._level_source:
-                        GLib.source_remove(self._level_source)
-                        self._level_source = 0
-                    try:
-                        self.recorder.stop()
-                    except Exception:
-                        pass
+                # user started typing: drop a live mic without sending. If
+                # that mic was listening for a card's spoken answer, clear
+                # that whole voice-answer state too — otherwise it stays
+                # "answering" and the *next* recording (a fresh command) gets
+                # misrouted to _resolve_prompt and silently discarded.
+                self._cancel_autohide()
+                if self._answering:
+                    self._stop_answer_listen()
+                else:
+                    self._stop_recording()
             if isinstance(body.get("copy"), str) and body["copy"]:
                 self._clipboard(body["copy"])
             if isinstance(body.get("link"), str):

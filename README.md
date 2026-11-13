@@ -14,6 +14,10 @@
   <img alt="License" src="https://img.shields.io/badge/license-MIT-black">
 </p>
 
+<p align="center">
+  <a href="assets/demo.mp4"><img src="assets/demo.gif" width="760" alt="Say the wake word, ask in Portuguese, and Atticus opens the right channel and asks to confirm"></a>
+</p>
+
 ## What it is
 
 Atticus puts a small always-on-top panel in the corner of your screen. You start

@@ -36,7 +36,18 @@ MODELS = RES / "models"
 VARIANTS = {
     "siri": {"siri", "siris", "siree", "ciri", "syria", "serie", "série",
              "cyrie", "cyree", "psyri", "hey siri", "ei siri", "siriy", "sidi"},
+    # The "ei" prefix is transcribed wildly ("a siri", "eiz siri", "pc"), so for
+    # recall also accept the distinctive "siri" word on its own + close variants.
+    "ei siri": {"ei siri", "hey siri", "siri", "ciri", "sirih", "siree", "psiri", "cyri"},
     "atticus": {"atticus", "attic us", "attic"},
+}
+
+
+# faster-whisper hallucinates these stock phrases on silence/noise (pt + en).
+_HALLUCINATIONS = {
+    "legendas pela comunidade de amara org", "legendas pela comunidade amara org",
+    "amara org", "obrigado por assistir", "inscreva se no canal", "ate o proximo video",
+    "thanks for watching", "subtitles by the amara org community", "you",
 }
 
 
@@ -86,6 +97,7 @@ class WakeListener:
         self.targets.add(self.word)
         self.wake_model_size = os.environ.get("ATTICUS_WAKE_MODEL", "small")
         self._wake_lang = _setting("asrLanguage", "auto")
+        self._vad = float(_setting("wakeVad", 0.045) or 0.045)   # speech gate for the whisper fallback
         self._engine = "livekit" if self.model_file else "whisper"
         self._lk = None
         self._whisper = None
@@ -178,6 +190,8 @@ class WakeListener:
     def _loop_whisper(self):
         frame = 640
         speech, seg, silence = False, bytearray(), 0
+        dbg = bool(os.environ.get("ATTICUS_DEBUG"))
+        hb_n, hb_max, hb_t = 0, 0.0, time.monotonic()
         self._proc = self._spawn()
         while self._running:
             if self._paused or not self._proc:
@@ -192,7 +206,12 @@ class WakeListener:
                 continue
             s = np.frombuffer(data, dtype=np.int16)
             rms = float(np.sqrt(np.mean((s.astype(np.float32) / 32768.0) ** 2))) if s.size else 0.0
-            if rms > 0.02:
+            if dbg:
+                hb_n += 1; hb_max = max(hb_max, rms)
+                if time.monotonic() - hb_t > 2.0:
+                    print(f"[wake] audio alive: frames={hb_n} max_rms={hb_max:.3f} paused={self._paused}", flush=True)
+                    hb_n, hb_max, hb_t = 0, 0.0, time.monotonic()
+            if rms > self._vad:
                 speech, silence = True, 0
                 seg += data
             elif speech:
@@ -217,17 +236,28 @@ class WakeListener:
             text = _norm(" ".join(s.text for s in segs))
         except Exception:
             return
+        if text in _HALLUCINATIONS:   # Whisper invents these on silence/noise
+            text = ""
+        if os.environ.get("ATTICUS_DEBUG"):
+            print(f"[wake] heard={text!r} match={self._matches(text) if text else False}", flush=True)
         if text and self._matches(text):
             self._fire_if_ready()
 
     def _matches(self, text: str) -> bool:
         words = text.split()
         for t in self.targets:
-            if " " in t:
-                if t in text:
+            toks = t.split()
+            if len(toks) == 1:
+                if any(w == toks[0] or _lev1(w, toks[0]) for w in words):
                     return True
-            elif any(w == t or _lev1(w, t) for w in words):
-                return True
+            else:
+                # Multi-word phrase: each token may be mis-transcribed a little
+                # ("ei siri" -> "eiz siri", "ei ciri"), so fuzzy-match each word
+                # of a sliding window in order.
+                for i in range(len(words) - len(toks) + 1):
+                    if all(words[i + j] == toks[j] or _lev1(words[i + j], toks[j])
+                           for j in range(len(toks))):
+                        return True
         return False
 
     def _fire(self) -> bool:

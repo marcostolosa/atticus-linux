@@ -83,6 +83,7 @@ def main():
             self.app = app
             self.listening = False
             self._level_source = 0
+            self._fix_mic_gain()
             self._wake_session = False
             self._speech_seen = False
             self._silence_since = 0.0
@@ -119,6 +120,31 @@ def main():
             # Hold the app alive without a visible window until the hotkey fires.
             self._hold = Gio.Application.hold(app)
             self.overlay.window.set_visible(False)
+
+        def _fix_mic_gain(self):
+            # On PipeWire the mic level is the SOURCE node volume (pactl), not the
+            # ALSA amixer "Capture". Some laptop codecs also default "Internal Mic
+            # Boost" to a huge gain that rails the ADC. Reset the boost and set a
+            # sane PipeWire capture volume at startup. micFix=false disables.
+            if not cfg.get("micFix", True):
+                return
+            import shutil
+            card = str(cfg.get("micCard", "0"))
+            if shutil.which("amixer"):
+                try:
+                    subprocess.run(["amixer", "-c", card, "sset", "Internal Mic Boost", "0"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+                except Exception:
+                    pass
+            if shutil.which("pactl"):
+                vol = str(cfg.get("micVolume", "45")).rstrip("%")
+                for args in (["set-source-mute", "@DEFAULT_SOURCE@", "0"],
+                             ["set-source-volume", "@DEFAULT_SOURCE@", f"{vol}%"]):
+                    try:
+                        subprocess.run(["pactl", *args],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+                    except Exception:
+                        pass
 
         # --- hotkey / control ---------------------------------------------
         def _on_control(self, cmd, arg):

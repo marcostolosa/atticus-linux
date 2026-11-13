@@ -40,6 +40,20 @@ if [ ! -d "$VENV" ]; then
 fi
 "$VENV/bin/pip" install -q --upgrade pip
 "$VENV/bin/pip" install -q --only-binary=:all: faster-whisper numpy
+# Neural text-to-speech (natural voice). If it or the voice cannot be fetched,
+# the app falls back to espeak-ng, so this is best-effort and never fatal.
+"$VENV/bin/pip" install -q piper-tts 2>/dev/null || echo "Note: piper-tts not installed; espeak-ng voice will be used."
+
+# Download the default pt-BR neural voice once, into ./models (git-ignored).
+if "$VENV/bin/python" -c "import piper" 2>/dev/null; then
+  mkdir -p "$SRC/models"
+  if [ ! -f "$SRC/models/pt_BR-faber-medium.onnx" ]; then
+    echo "Downloading neural voice pt_BR-faber-medium (about 63 MB, once)…"
+    "$VENV/bin/python" -m piper.download_voices pt_BR-faber-medium --data-dir "$SRC/models" 2>/dev/null \
+      && echo "Voice ready: pt_BR-faber-medium" \
+      || echo "Note: voice download skipped (offline?); espeak-ng will be used."
+  fi
+fi
 
 # --- launchers -------------------------------------------------------------
 BIN="$HOME/.local/bin"
@@ -61,24 +75,33 @@ echo "Installed launchers: $BIN/atticus, $BIN/atticus-ctl (v$VERSION)"
 
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "Note: add $BIN to PATH.";; esac
 
+# --- systemd user service --------------------------------------------------
+# A user service (never system/root): it needs the Wayland session, mic and
+# display. On Omarchy (uwsm) the graphical session env reaches it automatically.
+UNIT_DIR="$HOME/.config/systemd/user"
+mkdir -p "$UNIT_DIR"
+sed "s|%h/.local/bin/atticus|$BIN/atticus|" "$SRC/systemd/atticus.service" > "$UNIT_DIR/atticus.service"
+if command -v systemctl >/dev/null; then
+  systemctl --user daemon-reload 2>/dev/null || true
+  # Make sure the session env is visible to the user manager (no-op under uwsm).
+  systemctl --user import-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR HYPRLAND_INSTANCE_SIGNATURE DISPLAY 2>/dev/null || true
+  systemctl --user enable --now atticus.service 2>/dev/null \
+    && echo "Service enabled and started: systemctl --user status atticus" \
+    || echo "Service installed. Start it with: systemctl --user enable --now atticus"
+fi
+
 cat <<EOF
 
-Next steps (Omarchy / Hyprland uses Lua config)
------------------------------------------------
-1) Hotkey. Add to ~/.config/hypr/bindings.lua:
+Done. Manage it like any service:
+    systemctl --user status atticus     # is it running?
+    systemctl --user restart atticus    # after changing settings
+    journalctl --user -u atticus -f     # live logs
+
+One manual step (Hyprland keeps its keybinds in Lua). Add to
+~/.config/hypr/bindings.lua, then run: hyprctl reload && hyprctl configerrors
 
     o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "$BIN/atticus-ctl toggle")
 
-   Then reload + validate:
-    hyprctl reload && hyprctl configerrors
-
-2) Autostart at login. Add to ~/.config/hypr/autostart.lua:
-
-    o.exec_on_start("$BIN/atticus")
-
-3) Start now without logging out:   setsid -f $BIN/atticus
-4) Press Ctrl+Alt+Space, talk, press again to send.
-
-   (Toggle mode: press to listen, press again to send. Hold-to-talk with a
-    release bind can be added later once a reliable Hyprland bindr path is set.)
+Then press Ctrl+Alt+Space (or say the wake word, if enabled), talk, and press
+again to send. Settings live in ~/.config/atticus/settings.json.
 EOF

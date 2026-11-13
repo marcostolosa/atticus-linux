@@ -52,6 +52,7 @@ def main():
     from .control import ControlServer
     from .speech import Recorder, Transcriber
     from .tts import Speaker
+    from .earcons import Earcons
     from .wakeword import WakeListener
     from . import settings as cfg
 
@@ -91,10 +92,14 @@ def main():
             # Bring the hotkey socket up first so it's ready before WebKit finishes init.
             self.control = ControlServer(self._on_control)
             self.control.start()
-            self.overlay = Overlay(app, on_message=self._on_message)
+            self.overlay = Overlay(app, on_message=self._on_message,
+                                   on_escape=self._cancel)
+            self._autohide_source = 0
+            self._floor = None
             self.recorder = Recorder()
             self.transcriber = Transcriber()
             self.speaker = Speaker()
+            self.earcons = Earcons()
             # Speak each answer in the language the user just spoke (pt-BR / en-US).
             self.bridge = Bridge(
                 self.overlay,
@@ -186,7 +191,9 @@ def main():
                 return
             if self.wake:
                 self.wake.pause()   # don't let the spotter fight the command mic
+            self._cancel_autohide()
             self.overlay.present()
+            self.earcons.play("start")   # rising blip: "I'm listening"
             if not self.recorder.start():
                 self.overlay.call("msg", "No microphone available.")
                 self._resume_wake()
@@ -195,6 +202,7 @@ def main():
             self._wake_session = wake
             self._speech_seen = False
             self._silence_since = 0.0
+            self._floor = None
             self._listen_started = time.monotonic()
             self.overlay.call("listen")        # creates a fresh voice turn (q/steps/answer)
             self._level_source = GLib.timeout_add(60, self._tick_level)
@@ -207,16 +215,33 @@ def main():
             # Wake-word sessions have no key release, so end on a trailing silence.
             if self._wake_session:
                 now = time.monotonic()
-                if level > 0.07:
+                # Grace window: ignore the opening earcon bleeding into the mic.
+                if now - self._listen_started < 0.5:
+                    return True
+                # Adaptive noise floor: track the quietest level, creep up slowly.
+                if self._floor is None or level < self._floor:
+                    self._floor = level
+                else:
+                    self._floor += (level - self._floor) * 0.02
+                speech_gate = max(0.10, self._floor + 0.07)
+                silence_gate = max(0.075, self._floor + 0.035)
+                if level >= speech_gate:
                     self._speech_seen = True
                     self._silence_since = 0.0
-                elif self._speech_seen:
+                elif self._speech_seen and level <= silence_gate:
                     if not self._silence_since:
                         self._silence_since = now
-                    elif now - self._silence_since > 1.3:
+                    elif now - self._silence_since > 0.9:
+                        if os.environ.get("ATTICUS_DEBUG"):
+                            print(f"[listen] endpoint: floor={self._floor:.3f} "
+                                  f"gate={silence_gate:.3f}", flush=True)
                         self._end_listen()
                         return False
-                if now - self._listen_started > 15:   # hard cap
+                # Nothing said after the keyword: don't hang open.
+                if not self._speech_seen and now - self._listen_started > 5:
+                    self._end_listen()
+                    return False
+                if now - self._listen_started > 12:   # hard cap
                     self._end_listen()
                     return False
             return True
@@ -229,6 +254,7 @@ def main():
                 GLib.source_remove(self._level_source)
                 self._level_source = 0
             audio = self.recorder.stop()
+            self.earcons.play("end")     # falling blip: "got it"
             self.overlay.call("think")
             threading.Thread(target=self._transcribe_and_run, args=(audio,), daemon=True).start()
 
@@ -253,8 +279,25 @@ def main():
             return False
 
         def _on_done(self):
-            # The answer finished streaming; start listening for the keyword again.
+            # The answer finished streaming; start listening for the keyword again
+            # and let the box fade away on its own after a reading pause.
             self._resume_wake()
+            self._schedule_autohide()
+
+        def _schedule_autohide(self, secs=14):
+            self._cancel_autohide()
+            self._autohide_source = GLib.timeout_add_seconds(secs, self._autohide)
+
+        def _cancel_autohide(self):
+            if self._autohide_source:
+                GLib.source_remove(self._autohide_source)
+                self._autohide_source = 0
+
+        def _autohide(self):
+            self._autohide_source = 0
+            if not self.listening and not self.bridge.running():
+                self.overlay.hide()
+            return False
 
         def _resume_wake(self):
             if self.wake and not self.listening and not self.bridge.running():
@@ -284,10 +327,16 @@ def main():
             self.speaker.stop()
             self.bridge.cancel()
             self.overlay.call("stopped", "")
+            self.earcons.play("cancel")
+            self._cancel_autohide()
+            self.overlay.hide()
             self._resume_wake()
 
         # --- overlay page -> shell ----------------------------------------
         def _on_message(self, body):
+            if body.get("close"):
+                self._cancel()   # the box's X: stop everything and hide
+                return
             if "send" in body and isinstance(body["send"], str):
                 self._submit_typed(body["send"])
             if body.get("type"):

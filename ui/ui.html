@@ -623,6 +623,8 @@
   bar.querySelector('.gotit').onclick = coachDone;
   const markShot = () => { const img = bar.querySelector('img'); return bar.classList.contains('has') && !img.hidden && img.src; };   // the crop the next ask carries into its bubble
   $('mic').onclick = () => { $('ask').value = ''; comp(false); post({ mic: 1 }); };
+  $('x').style.cursor = 'pointer'; $('x').setAttribute('role', 'button'); $('x').setAttribute('aria-label', 'Close');
+  $('x').onclick = e => { e.stopPropagation(); post({ close: true }); };   // the real dismiss button
   const status = (s, live) => {
     if (s && listening) s = 'Listening…';   // early AI notes never replace it while the user talks
     $('status').className = live ? 'live' : '';

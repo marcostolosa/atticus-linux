@@ -1,0 +1,16 @@
+[Unit]
+Description=Atticus voice assistant (overlay, wake word, voice)
+Documentation=https://github.com/marcostolosa/atticus-linux
+# User service: it needs the Wayland session, microphone and display, so it is
+# tied to the graphical session, never run as a system/root service.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/atticus
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

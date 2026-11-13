@@ -1,7 +1,14 @@
 """Text-to-speech — the Linux replacement for macOS `say`.
 
-v1 uses espeak-ng when present (and is a no-op otherwise, so the core loop never
-depends on it). A nicer piper voice can slot in behind the same interface later.
+Two engines, chosen automatically:
+
+  * piper   (preferred): a small neural voice (.onnx from piper) streamed as raw
+    PCM into a PipeWire/Pulse player. Natural, offline, fast on CPU. Used when a
+    voice model exists (settings `ttsModel`, else models/<ttsVoice>.onnx, default
+    pt_BR-faber-medium). Install: pip install piper-tts + download the voice.
+  * espeak  (fallback): espeak-ng/espeak formant synth. Robotic but dependency-
+    free, so the core loop never hard-depends on a model being present.
+
 Only runs when the user's "speak answers" setting is on.
 """
 from __future__ import annotations
@@ -11,12 +18,15 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
 
-# Map detected/UI language codes to espeak-ng voices. pt-BR and en-US are the
-# primary targets; others kept from the macOS UI language set.
+RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
+MODELS = RES / "models"
+
+# Map detected/UI language codes to espeak-ng voices (fallback engine only).
 _VOICE = {"en": "en-us", "pt": "pt-br", "pt-br": "pt-br",
           "it": "it", "es": "es", "fr": "fr", "de": "de"}
 
@@ -29,45 +39,88 @@ def spoken(answer: str) -> str:
     s = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", s)           # images
     s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)        # links -> text
     s = re.sub(r"[*_#>~]", "", s)                          # emphasis/heading marks
-    s = s.replace(" ", "\n")
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
 
+def _piper_bin() -> Optional[str]:
+    cand = Path(sys.executable).parent / "piper"
+    if cand.exists():
+        return str(cand)
+    return shutil.which("piper")
+
+
+def _piper_model() -> Optional[str]:
+    """Resolve a piper voice: settings ttsModel, else models/<ttsVoice>.onnx."""
+    p = _setting("ttsModel")
+    if p and os.path.exists(os.path.expanduser(p)):
+        return os.path.expanduser(p)
+    voice = _setting("ttsVoice") or "pt_BR-faber-medium"
+    cand = MODELS / f"{voice}.onnx"
+    return str(cand) if cand.exists() else None
+
+
+def _player_cmd(rate: int) -> Optional[list]:
+    """A raw-PCM player: s16le mono at the voice's sample rate."""
+    if shutil.which("paplay"):
+        return ["paplay", "--raw", f"--rate={rate}", "--channels=1",
+                "--format=s16le"]
+    if shutil.which("pw-cat"):
+        return ["pw-cat", "--playback", "--rate", str(rate), "--channels", "1",
+                "--format", "s16", "-"]
+    if shutil.which("aplay"):
+        return ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate),
+                "-c", "1", "-"]
+    return None
+
+
+def _setting(key, default=None):
+    p = Path(os.environ.get("ATTICUS_DIR", Path.home() / ".config/atticus")) / "settings.json"
+    try:
+        return json.loads(p.read_text()).get(key, default)
+    except (OSError, ValueError):
+        return default
+
+
 class Speaker:
     def __init__(self):
-        self._engine = "espeak-ng" if shutil.which("espeak-ng") else (
-            "espeak" if shutil.which("espeak") else None)
-        self._proc: Optional[subprocess.Popen] = None
+        self._piper = _piper_bin()
+        self._model = _piper_model()
+        self._rate = 22050
+        self._player = _player_cmd(self._rate)
+        if self._piper and self._model and self._player:
+            try:
+                cfg = json.loads(Path(self._model + ".json").read_text())
+                self._rate = int(cfg.get("audio", {}).get("sample_rate", 22050))
+                self._player = _player_cmd(self._rate)
+            except Exception:
+                pass
+            self._engine = "piper"
+        else:
+            self._engine = ("espeak-ng" if shutil.which("espeak-ng")
+                            else ("espeak" if shutil.which("espeak") else None))
+        self._espeak = ("espeak-ng" if shutil.which("espeak-ng")
+                        else ("espeak" if shutil.which("espeak") else None))
+        self._procs: list[subprocess.Popen] = []
         self._lock = threading.Lock()
+
+    @property
+    def engine(self) -> str:
+        return self._engine or "none"
 
     def available(self) -> bool:
         return self._engine is not None
 
     def _enabled(self) -> bool:
-        p = Path(os.environ.get("ATTICUS_DIR", Path.home() / ".config/atticus")) / "settings.json"
-        try:
-            s = json.loads(p.read_text())
-        except (OSError, ValueError):
-            s = {}
-        return bool(s.get("speak", True))   # default on, like the Mac read-aloud
+        return bool(_setting("speak", True))   # default on, like the Mac read-aloud
 
-    def _language(self, override: Optional[str] = None) -> str:
-        if override:
-            key = override.lower()
-            if key in _VOICE:
-                return _VOICE[key]
-        p = Path(os.environ.get("ATTICUS_DIR", Path.home() / ".config/atticus")) / "settings.json"
-        try:
-            s = json.loads(p.read_text())
-        except (OSError, ValueError):
-            s = {}
-        lang = (s.get("uiLanguage") or "").lower()
+    def _espeak_voice(self, override: Optional[str] = None) -> str:
+        if override and override.lower() in _VOICE:
+            return _VOICE[override.lower()]
+        lang = str(_setting("uiLanguage", "") or "").lower()
         if lang in _VOICE:
             return _VOICE[lang]
-        # Fall back to the configured ASR language when it's a concrete one
-        # (this install pins pt -> pt-br); otherwise a neutral default.
-        asr = str(s.get("asrLanguage", "auto")).lower()
+        asr = str(_setting("asrLanguage", "auto")).lower()
         return _VOICE.get(asr, "en-us")
 
     def speak(self, text: str, language: Optional[str] = None):
@@ -77,20 +130,58 @@ class Speaker:
         if not words:
             return
         self.stop()
-        voice = self._language(language)
+        # The piper voice is pt-BR; read non-pt answers with espeak if we have it.
+        lang = (language or "").lower()
+        use_piper = (self._engine == "piper" and
+                     (not lang or lang.startswith("pt") or not self._espeak))
+        if use_piper:
+            self._speak_piper(words)
+        else:
+            self._speak_espeak(words, language)
+
+    def _speak_piper(self, words: str):
         with self._lock:
             try:
-                self._proc = subprocess.Popen(
-                    [self._engine, "-v", voice, words],
+                synth = subprocess.Popen(
+                    [self._piper, "-m", self._model, "--output-raw"],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL)
+                play = subprocess.Popen(
+                    self._player, stdin=synth.stdout,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                synth.stdout.close()   # play owns the read end
+                self._procs = [play, synth]
             except OSError:
-                self._proc = None
+                self._procs = []
+                return
+        # Feed the text on a worker so speak() returns immediately.
+        def feed():
+            try:
+                synth.stdin.write(words.encode("utf-8"))
+                synth.stdin.close()
+            except Exception:
+                pass
+        threading.Thread(target=feed, daemon=True).start()
+
+    def _speak_espeak(self, words: str, language: Optional[str]):
+        engine = self._espeak or self._engine
+        if engine not in ("espeak", "espeak-ng"):
+            return
+        voice = self._espeak_voice(language)
+        with self._lock:
+            try:
+                self._procs = [subprocess.Popen(
+                    [engine, "-v", voice, words],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
+            except OSError:
+                self._procs = []
 
     def stop(self):
         with self._lock:
-            if self._proc and self._proc.poll() is None:
-                try:
-                    self._proc.terminate()
-                except Exception:
-                    pass
-            self._proc = None
+            for p in self._procs:
+                if p and p.poll() is None:
+                    try:
+                        p.terminate()
+                    except Exception:
+                        pass
+            self._procs = []

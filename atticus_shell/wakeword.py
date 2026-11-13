@@ -167,6 +167,8 @@ class WakeListener:
     # --- livekit engine: stream fixed frames through the ONNX model ---------
     def _loop_livekit(self):
         chunk = 1280 * 2   # 80 ms frame (FRAME_SAMPLES * int16)
+        dbg = bool(os.environ.get("ATTICUS_DEBUG"))
+        peak, hb_t = 0.0, time.monotonic()
         self._proc = self._spawn()
         while self._running:
             if self._paused or not self._proc:
@@ -183,7 +185,15 @@ class WakeListener:
                 scores = self._lk.predict(samples)
             except Exception:
                 continue
-            if scores and max(scores.values()) >= self.threshold:
+            top = max(scores.values()) if scores else 0.0
+            if dbg:
+                peak = max(peak, top)
+                if top >= 0.30:   # log anything that looks remotely like the word
+                    print(f"[wake] score={top:.3f} (thr={self.threshold:.2f}) {'FIRE' if top >= self.threshold else ''}", flush=True)
+                if time.monotonic() - hb_t > 3.0:
+                    print(f"[wake] alive, peak_score_3s={peak:.3f} paused={self._paused}", flush=True)
+                    peak, hb_t = 0.0, time.monotonic()
+            if top >= self.threshold:
                 self._fire_if_ready()
 
     # --- whisper fallback engine: VAD-segment, transcribe, fuzzy match ------

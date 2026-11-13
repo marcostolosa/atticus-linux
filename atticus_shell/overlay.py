@@ -72,8 +72,10 @@ class Overlay:
 
     def __init__(self, app: Gtk.Application,
                  on_message: Optional[Callable[[dict], None]] = None,
-                 corner: str = "top-left"):
+                 corner: str = "top-left",
+                 on_escape: Optional[Callable[[], None]] = None):
         self.on_message = on_message or (lambda b: None)
+        self.on_escape = on_escape or (lambda: None)
         self.corner = corner
         self._ready = False
         self._pending: list[str] = []   # JS queued until the page loads
@@ -111,8 +113,24 @@ class Overlay:
         self.web.connect("load-changed", self._on_load)
         self.window.set_child(self.web)
 
+        # Esc anywhere in the box dismisses it (keyboard is ON_DEMAND: arrives
+        # once the surface has focus). The shell also hides it via control/cancel.
+        key = Gtk.EventControllerKey()
+        key.connect("key-pressed", self._on_key)
+        self.window.add_controller(key)
+
         self._init_layer_shell()
         self.load("ui.html")
+
+    def _on_key(self, ctrl, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape:
+            try:
+                self.on_escape()
+            except Exception:
+                import traceback
+                traceback.print_exc()
+            return True
+        return False
 
     # --- layer-shell placement ---------------------------------------------
     def _init_layer_shell(self):

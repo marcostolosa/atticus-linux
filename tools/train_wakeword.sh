@@ -1,6 +1,6 @@
 #!/bin/bash
 # Train the Atticus "ei siri" / "siri" wake-word models with livekit-wakeword.
-# RUN THIS ON THE GPU PC (MEXICO, RTX 3060) — training needs CUDA. Detection runs
+# RUN THIS ON A MACHINE WITH AN NVIDIA GPU; training needs CUDA. Detection runs
 # on CPU on the Omarchy machine afterwards.
 #
 #   bash train_wakeword.sh
@@ -58,7 +58,7 @@ train() {   # $1 = phrase, $2 = expected onnx basename (phrase with spaces->_), 
     || livekit-wakeword eval --wakeword "$phrase" 2>/dev/null || true
 }
 
-echo "== 3/4  train 'ei siri' (recommended — longer = fewer false triggers) =="
+echo "== 3/4  train 'ei siri' (recommended - longer = fewer false triggers) =="
 train "ei siri" "ei_siri" \
   --hard-negative "ei" --hard-negative "aí" --hard-negative "ei você" --hard-negative "série"
 
@@ -68,11 +68,11 @@ train "siri" "siri" \
 
 echo
 echo "Done. Models:"
-ls -la models/*.onnx 2>/dev/null || echo "  (no .onnx produced — check the eval output above)"
+ls -la models/*.onnx 2>/dev/null || echo "  (no .onnx produced - check the eval output above)"
 cat <<'MSG'
 
 Next: copy a model to the Omarchy PC, e.g.:
-    scp models/ei_siri.onnx  tr0p@OMARCHY-IP:~/atticus-linux/models/
+    scp models/ei_siri.onnx  user@YOUR-OMARCHY-PC:~/atticus-linux/models/
 Then on Omarchy: set "wakeWord":"ei siri" in ~/.config/atticus/settings.json and
 restart Atticus. It will print 'wake word on (livekit, trained model)'.
 MSG

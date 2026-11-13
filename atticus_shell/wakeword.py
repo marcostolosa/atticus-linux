@@ -1,13 +1,15 @@
 """Always-on wake word — say the keyword (default "Siri") to start listening.
 
-The keyword is an out-of-vocabulary name, which small streaming recognizers
-(Vosk, openWakeWord's stock models) don't handle. faster-whisper does — it is
-multilingual (so "Siri" / pt-BR "SÍ-RI" both transcribe) and knows the token.
+Two engines, chosen automatically:
 
-To keep an always-on spotter cheap we don't run Whisper continuously: a light
-RMS voice-activity gate segments the mic, and only short speech segments (the
-length of a wake phrase) are transcribed, with the fast "tiny" model. A fuzzy
-match against the keyword and its homophones then fires on_wake().
+  * livekit  (preferred): a small trained .onnx model (from `livekit-wakeword
+    train`) streamed frame-by-frame. Real streaming detection, ~1.7% of one CPU
+    core, low false-positive rate. Used when a model file exists
+    (settings `wakeModel`, else models/<word>.onnx). See tools/train_wakeword.md.
+  * whisper  (fallback, no training): an RMS voice-activity gate segments the
+    mic and faster-whisper transcribes each short segment; a fuzzy match on the
+    keyword fires it. Works immediately but higher latency / CPU than a trained
+    model. Lets the feature work before the user trains a model.
 
 Audio: PipeWire parecord, 16 kHz mono s16le (same as the command recorder).
 """
@@ -19,6 +21,7 @@ import subprocess
 import threading
 import time
 import unicodedata
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -26,12 +29,14 @@ import numpy as np
 from .speech import _record_cmd, SAMPLE_RATE
 from .settings import get as _setting
 
-# Homophone variants per keyword: Whisper usually prints the name, but accents,
-# pt-BR pronunciation and mishearings vary, so match a small set plus edit-distance 1.
+RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
+MODELS = RES / "models"
+
+# Whisper-fallback homophone variants per keyword (Whisper usually prints the name).
 VARIANTS = {
-    "siri": {"siri", "siris", "siree", "siri", "ciri", "syria", "serie", "série",
-             "cyrie", "cyree", "psyri", "hey siri", "siriy", "sirih", "sidi"},
-    "atticus": {"atticus", "attic us", "attic", "atticus"},
+    "siri": {"siri", "siris", "siree", "ciri", "syria", "serie", "série",
+             "cyrie", "cyree", "psyri", "hey siri", "ei siri", "siriy", "sidi"},
+    "atticus": {"atticus", "attic us", "attic"},
 }
 
 
@@ -41,7 +46,6 @@ def _norm(s: str) -> str:
 
 
 def _lev1(a: str, b: str) -> bool:
-    """True if edit distance(a, b) <= 1 (cheap early-out version)."""
     if a == b:
         return True
     la, lb = len(a), len(b)
@@ -57,11 +61,17 @@ def _lev1(a: str, b: str) -> bool:
             edits += 1
             if edits > 1:
                 return False
-            if la == lb:
-                i += 1; j += 1
-            else:
-                j += 1
+            i, j = (i + 1, j + 1) if la == lb else (i, j + 1)
     return True
+
+
+def model_path(word: str) -> Optional[str]:
+    """Resolve a trained wake-word model: settings wakeModel, else models/<word>.onnx."""
+    p = _setting("wakeModel")
+    if p and os.path.exists(os.path.expanduser(p)):
+        return os.path.expanduser(p)
+    cand = MODELS / f"{re.sub(r'[^a-z0-9]+', '_', word.lower()).strip('_')}.onnx"
+    return str(cand) if cand.exists() else None
 
 
 class WakeListener:
@@ -69,42 +79,61 @@ class WakeListener:
                  model: Optional[str] = None, variants: Optional[set] = None):
         self.on_wake = on_wake
         self.word = _norm(word) or "siri"
+        self.model_file = model or model_path(self.word)
+        self.threshold = float(_setting("wakeThreshold", 0.5) or 0.5)
+        # whisper fallback config
         self.targets = {_norm(v) for v in (variants or VARIANTS.get(self.word, {self.word}))}
         self.targets.add(self.word)
-        self.model_size = model or os.environ.get("ATTICUS_WAKE_MODEL", "tiny")
+        self.wake_model_size = os.environ.get("ATTICUS_WAKE_MODEL", "small")
         self._wake_lang = _setting("asrLanguage", "auto")
-        self._model = None
+        self._engine = "livekit" if self.model_file else "whisper"
+        self._lk = None
+        self._whisper = None
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._paused = False
         self._last_fire = 0.0
 
+    @property
+    def engine(self) -> str:
+        return self._engine
+
     def available(self) -> bool:
         if _record_cmd() is None:
             return False
+        if self._engine == "livekit":
+            try:
+                import livekit.wakeword  # noqa: F401
+                return True
+            except Exception:
+                self._engine = "whisper"   # library missing: fall back
         try:
             import faster_whisper  # noqa: F401
             return True
         except Exception:
             return False
 
-    def _load(self):
-        if self._model is None:
-            from faster_whisper import WhisperModel
-            self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
-
-    def start(self) -> bool:
-        if self._running:
-            return True
+    def _load(self) -> bool:
         try:
-            self._load()
+            if self._engine == "livekit":
+                from livekit.wakeword import WakeWordModel
+                self._lk = WakeWordModel(models=[self.model_file], sample_rate=SAMPLE_RATE)
+            else:
+                from faster_whisper import WhisperModel
+                self._whisper = WhisperModel(self.wake_model_size, device="cpu", compute_type="int8")
+            return True
         except Exception:
             import traceback
             traceback.print_exc()
             return False
+
+    def start(self) -> bool:
+        if self._running or not self._load():
+            return self._running
         self._running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        target = self._loop_livekit if self._engine == "livekit" else self._loop_whisper
+        self._thread = threading.Thread(target=target, daemon=True)
         self._thread.start()
         return True
 
@@ -115,9 +144,39 @@ class WakeListener:
         except OSError:
             return None
 
-    def _loop(self):
+    def _fire_if_ready(self):
         from gi.repository import GLib
-        frame = 640  # 20 ms at 16 kHz s16le (320 samples * 2 bytes)
+        now = time.monotonic()
+        if now - self._last_fire < 2.0:
+            return
+        self._last_fire = now
+        GLib.idle_add(self._fire)
+
+    # --- livekit engine: stream fixed frames through the ONNX model ---------
+    def _loop_livekit(self):
+        chunk = 1280 * 2   # 80 ms frame (FRAME_SAMPLES * int16)
+        self._proc = self._spawn()
+        while self._running:
+            if self._paused or not self._proc:
+                time.sleep(0.1)
+                if not self._paused and not self._proc:
+                    self._proc = self._spawn()
+                continue
+            data = self._proc.stdout.read(chunk)
+            if not data:
+                time.sleep(0.02)
+                continue
+            samples = np.frombuffer(data, dtype=np.int16)
+            try:
+                scores = self._lk.predict(samples)
+            except Exception:
+                continue
+            if scores and max(scores.values()) >= self.threshold:
+                self._fire_if_ready()
+
+    # --- whisper fallback engine: VAD-segment, transcribe, fuzzy match ------
+    def _loop_whisper(self):
+        frame = 640
         speech, seg, silence = False, bytearray(), 0
         self._proc = self._spawn()
         while self._running:
@@ -131,42 +190,35 @@ class WakeListener:
             if not data:
                 time.sleep(0.02)
                 continue
-            samples = np.frombuffer(data, dtype=np.int16)
-            rms = float(np.sqrt(np.mean((samples.astype(np.float32) / 32768.0) ** 2))) if samples.size else 0.0
+            s = np.frombuffer(data, dtype=np.int16)
+            rms = float(np.sqrt(np.mean((s.astype(np.float32) / 32768.0) ** 2))) if s.size else 0.0
             if rms > 0.02:
-                speech = True
-                silence = 0
+                speech, silence = True, 0
                 seg += data
             elif speech:
                 silence += 1
                 seg += data
-                if silence > 18:   # ~0.36 s trailing silence -> end of phrase
+                if silence > 18:
                     secs = len(seg) / 2 / SAMPLE_RATE
                     buf = bytes(seg)
                     speech, seg, silence = False, bytearray(), 0
                     if 0.2 < secs < 3.0:
-                        self._check(buf, GLib)
-            if len(seg) > SAMPLE_RATE * 2 * 4:   # cap a runaway segment at 4 s
+                        self._check_whisper(buf)
+            if len(seg) > SAMPLE_RATE * 2 * 4:
                 speech, seg, silence = False, bytearray(), 0
 
-    def _check(self, pcm: bytes, GLib):
+    def _check_whisper(self, pcm: bytes):
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         try:
-            # Bias to pt-BR (the user's language) so "Siri" / "SÍ-RI" decodes well.
             lang = os.environ.get("ATTICUS_WAKE_LANG", self._wake_lang)
-            segments, _ = self._model.transcribe(
+            segs, _ = self._whisper.transcribe(
                 audio, language=(None if lang == "auto" else lang),
                 beam_size=1, vad_filter=False, condition_on_previous_text=False)
-            text = _norm(" ".join(s.text for s in segments))
+            text = _norm(" ".join(s.text for s in segs))
         except Exception:
             return
-        if not text or not self._matches(text):
-            return
-        now = time.monotonic()
-        if now - self._last_fire < 2.0:
-            return
-        self._last_fire = now
-        GLib.idle_add(self._fire)
+        if text and self._matches(text):
+            self._fire_if_ready()
 
     def _matches(self, text: str) -> bool:
         words = text.split()
@@ -174,10 +226,8 @@ class WakeListener:
             if " " in t:
                 if t in text:
                     return True
-            else:
-                for w in words:
-                    if w == t or _lev1(w, t):
-                        return True
+            elif any(w == t or _lev1(w, t) for w in words):
+                return True
         return False
 
     def _fire(self) -> bool:
@@ -198,6 +248,11 @@ class WakeListener:
             self._proc = None
 
     def resume(self):
+        if self._lk is not None:
+            try:
+                self._lk.reset()
+            except Exception:
+                pass
         self._paused = False
 
     def stop(self):

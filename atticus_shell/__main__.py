@@ -108,9 +108,12 @@ def main():
                 self.wake = WakeListener(self._on_wake, word=word)
                 if self.wake.available():
                     self.wake.start()
-                    print(f"[atticus] wake word on: say '{word}'", flush=True)
+                    eng = self.wake.engine
+                    note = ("trained model" if eng == "livekit"
+                            else "whisper fallback — train a model for best results: tools/train_wakeword.md")
+                    print(f"[atticus] wake word on ({eng}, {note}): say '{word}'", flush=True)
                 else:
-                    print("[atticus] wake word enabled but Vosk model missing; run build.sh", flush=True)
+                    print("[atticus] wake word enabled but no engine available (need faster-whisper or a trained model)", flush=True)
                     self.wake = None
 
             # Hold the app alive without a visible window until the hotkey fires.

@@ -519,6 +519,27 @@ os.environ['PATH'] = f"/opt/homebrew/bin:/usr/local/bin:{HOME}/.local/bin:{HOME}
 INNER = bool(os.environ.get('ATTICUS_ASK'))   # started by the AI's own tool call, not by the user
 APP = os.environ.get('ATTICUS_APP') or os.path.join(HOME, 'Applications/Atticus.app/Contents/MacOS/Atticus')   # set by Atticus.app
 
+# Tool descriptions that differ by platform: macOS targets controls by their
+# accessibility label (AX API); Linux has no accessibility tree reliable
+# enough across GTK/Qt/Electron/terminal apps on this stack to do the same,
+# so native actions there go by pixel coordinate read off a {LOOK} picture
+# instead — the same pattern the existing Pointer feature already uses.
+if sys.platform == 'darwin':
+    _WEB_TOOL = (f'- Web actions: {WEB} click <n> | fill <n> "<text>" | type-after "<exact anchor>" "<text>"; numbers come from the window read. '
+                 'Each returns changed page state; check it.\n')
+    _HANDS_TOOL = (f'- Native actions: {HANDS} see [app] | menu <app> "<path>" | click <target> [near <label>] [double] [right] | '
+                   'scroll down|up|left|right [pages|all] [target] | scroll-to "text" | press "cmd+t" [times] | drag <from> <to> | '
+                   'type <field> "text" [submit] [append] | type-after "<exact anchor>" "<text>" | wait [seconds]. Prefer labels. '
+                   'Returns changed state; read documents with the window reader.\n')
+    _PLACE_NOTE = 'full maximizes; fullscreen enters a Space.'
+else:
+    _WEB_TOOL = ''   # in-page DOM control is not available on Linux; native click/type below covers pages too
+    _HANDS_TOOL = (f'- Native actions, by pixel coordinate (no accessibility label to target by name here): {HANDS} click <x> <y> [double] [right] | '
+                   'type "<text>" | press "<combo>" [times] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right [amount] | '
+                   f'drag <x1> <y1> <x2> <y2>. Read a fresh {LOOK} picture first and act on exactly the coordinates it shows; a stale picture is a '
+                   'wrong click. Returns changed state; read documents with the window reader.\n')
+    _PLACE_NOTE = 'full maximizes; fullscreen is the same as full (no separate Space on Linux).'
+
 SYSTEM = f"""You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.
 Stable facts: answer only if sure. Current facts: search once; prefer dated primary sources. Never invent. Batch independent work.
 Before tools: 3-8 plain words, no command names.
@@ -532,12 +553,11 @@ Forms/worksheets: read questions; fill labelled fields (personal: About you); ve
 Tools:
 - Window text: {WINDOW} [app] [--offset N] [--ocr]. DOM, AX, then OCR; each page prints the next offset. Restart at 0 after changes; --ocr when document text is missing.
 - For missing text or appearance/layout detail, {LOOK} prints fresh labelled pictures of all displays to Read; trust pictures over text. Picture coordinates only for targets absent from accessible controls.
-- Web actions: {WEB} click <n> | fill <n> "<text>" | type-after "<exact anchor>" "<text>"; numbers come from the window read. Each returns changed page state; check it.
-- Native actions: {HANDS} see [app] | menu <app> "<path>" | click <target> [near <label>] [double] [right] | scroll down|up|left|right [pages|all] [target] | scroll-to "text" | press "cmd+t" [times] | drag <from> <to> | type <field> "text" [submit] [append] | type-after "<exact anchor>" "<text>" | wait [seconds]. Prefer labels. Returns changed state; read documents with the window reader.
+{_WEB_TOOL}{_HANDS_TOOL}
 - App/site: always try; never blame sandbox/Terminal. Name the denied Settings switch.
 - System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.
 - Work behind: never activate/raise unless asked to open/show/switch/focus. {SHOW} --bg "<url|path|app>" opens behind, waits until ready. {SHOW} "<target>" respects Settings. {FRONT} "<app>" ["tab words"] pictures that window in place, even covered; raises only if asked. Helpers wait; never add sleep. Chain dependencies with &&; check each result.
-- Windows: {PLACE} "<process>" <left|right|full|fullscreen|center> <laptop|monitor|current|exact Context screen name> ["title words"]. full maximizes; fullscreen enters a Space. Combine moves with +. Get names from running apps/accessibility.
+- Windows: {PLACE} "<process>" <left|right|full|fullscreen|center> <laptop|monitor|current|exact Context screen name> ["title words"]. {_PLACE_NOTE} Combine moves with +. Get names from running apps/accessibility.
 - Type at the cursor: {TYPE} "<text>".
 - Web: {SEARCH} "<query>" finds URLs/snippets; {READ} "<url>" fetches text; WebSearch/WebFetch on failure. Never invent URLs/parameters; recover via the site's search/controls.
 - Files (if needed): mdfind -name "<words>" | head -20; content: mdfind -onlyin ~/Documents "<words>" | head.
@@ -1197,8 +1217,45 @@ def placement_window(proc, title):
     return None, f'no window found for "{proc}" {title}'
 
 
+def place_linux(proc, where='full', screen='current', title=''):
+    """Place a window by floating it and setting its exact pixel bounds
+    (Hyprland's Lua dispatchers), since there is no native-Space concept to
+    enter for 'fullscreen' here — it is handled the same as 'full'. Reuses
+    screens() for monitor resolution, which already calls the same native
+    --screens helper on this platform, so 'laptop'/'monitor'/a named display
+    all resolve exactly as they do in the shared code below."""
+    scr = screens()
+    if not scr:
+        return 'No display information available.'
+    if where not in ('left', 'right', 'full', 'center', 'fullscreen'):
+        return 'where must be left, right, full, fullscreen or center'
+    if screen in ('laptop', 'monitor'):
+        pick = (lambda s: s[5]) if screen == 'laptop' else (lambda s: not s[5])
+    elif screen == 'current':
+        try:
+            mons = json.loads(subprocess.run(['hyprctl', '-j', 'monitors'],
+                              capture_output=True, text=True, timeout=3).stdout or '[]')
+            focused = next((m.get('name') for m in mons if m.get('focused')), None)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            focused = None
+        pick = (lambda s: s[0] == focused) if focused else (lambda s: True)
+    else:
+        pick = lambda s: s[0] == screen
+    n, x, y, w, h, _ = next((s for s in scr if pick(s)), scr[0])
+    try:
+        r = subprocess.run([APP, '--hands', 'place', proc, where, n, title],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return f'Could not place {proc}: the native helper did not respond.'
+    if r.returncode:
+        return r.stdout.strip() or f'NOT DONE: {proc} did not move on {n}.'
+    return f'{proc}: {where}' + (f' on {n}' if screen != 'current' else '') + '.'
+
+
 def place(proc, where='full', screen='current', title=''):
     """Place a window; full maximizes, fullscreen enters a native macOS Space."""
+    if sys.platform != 'darwin':
+        return place_linux(proc, where, screen, title)
     native = where == 'fullscreen'
     if native: where = 'full'
     if where not in ('left', 'right', 'full', 'center'):
@@ -3134,8 +3191,49 @@ def hands_map(app='', target=None):
         return None
 
 
+LINUX_HANDS_VERBS = {'click', 'type', 'press', 'scroll', 'drag'}
+
+
+def hands_linux(*args):
+    """Linux: click/type/press/scroll by pixel coordinate (ydotool + Hyprland,
+    via $ATTICUS_APP --hands), not by accessibility label — there is no
+    accessibility tree reliable enough across GTK/Qt/Electron/terminal apps
+    on this stack to target a control by name the way macOS's AX API does.
+    Coordinates come from a {LOOK} picture, the same pattern the Pointer
+    feature already uses. Modifier keys are ctrl/alt/super, not cmd/opt."""
+    if not args or args[0] not in LINUX_HANDS_VERBS or any(a.startswith('--') for a in args[1:]):
+        return ('Use --hands click <x> <y> [double] [right] | type "<text>" | '
+                'press "<combo>" [times] | scroll up|down|left|right [amount] | '
+                'drag <x1> <y1> <x2> <y2>; no flags. Get x/y from a {LOOK} picture.'), False
+    if not wait_commit():
+        return 'The request was cancelled before the transcript was confirmed.', False
+    verb = args[0]
+    # No accessibility label to show or classify as risky here, so every
+    # click/press/drag (never a plain scroll, or filling a field) gets the
+    # same Allow card a risky mac action would, unless the user's own words
+    # already asked for exactly this action this turn.
+    if verb in ('click', 'press', 'drag') and pref('safe', True) and not task_allowed('hands ' + verb):
+        detail = ' '.join(args[1:])
+        if not os.environ.get('ATTICUS_ASK'):
+            return f'Safe mode: {verb} "{detail}" needs the user’s Allow card.', False
+        question = f'{verb.capitalize()} "{detail[:120]}"?'
+        answer = ask_user({'q': question, 'cmd': f'{verb} {detail[:300]}', 'task': managed_agent()}, 60)
+        if answer == 'task' and managed_agent(): allow_for_task('hands ' + verb)
+        elif answer != 'y':
+            return 'The user said no. Do not try another way; say it was not done.', False
+    try:
+        r = subprocess.run([APP, '--hands', *args], capture_output=True, text=True, timeout=15)
+        if r.returncode:
+            return r.stdout.strip() or 'Could not do that. ydotool may not be set up (see README).', False
+        return r.stdout.strip() or 'Done.', True
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f'Hands could not finish: {e}', False
+
+
 def hands(*args):
     """The only model-facing native helper. No approval/force/app-changing flags are accepted."""
+    if sys.platform != 'darwin':
+        return hands_linux(*args)
     if not args or args[0] not in HANDS_VERBS or any(a.startswith('--') for a in args[1:]):
         return 'Use --hands see|menu|click|scroll|scroll-to|press|drag|type|type-after|wait; no flags.', False
     if not wait_commit():

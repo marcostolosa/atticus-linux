@@ -15,13 +15,20 @@ command -v hyprctl >/dev/null || echo "Warning: hyprctl not found; v1 targets Hy
 need_sys=()
 pkg_for() { case "$1" in
   grim|slurp|wl-copy|wl-paste) echo "grim slurp wl-clipboard";;
-  tesseract) echo "tesseract tesseract-data-eng";;
+  tesseract) echo "tesseract tesseract-data-eng tesseract-data-por";;
   parecord|pw-record) echo "pipewire-pulse";;
   espeak-ng) echo "espeak-ng";;
   ffmpeg) echo "ffmpeg";;
+  fd) echo "fd";;
+  rg) echo "ripgrep";;
+  ydotool) echo "ydotool";;
+  playerctl) echo "playerctl";;
   *) echo "$1";;
 esac; }
-for t in grim slurp wl-copy tesseract ffmpeg; do
+# fd/rg back the file-search tool; ydotool/playerctl back native click/type
+# and media control — all optional in the sense that Atticus still runs and
+# talks without them, just with those specific abilities missing.
+for t in grim slurp wl-copy tesseract ffmpeg fd rg ydotool playerctl; do
   command -v "$t" >/dev/null || need_sys+=("$(pkg_for "$t")")
 done
 python3 -c 'import gi; gi.require_version("WebKit","6.0"); gi.require_version("Gtk4LayerShell","1.0")' 2>/dev/null \
@@ -74,6 +81,24 @@ chmod +x "$BIN/atticus" "$BIN/atticus-ctl"
 echo "Installed launchers: $BIN/atticus, $BIN/atticus-ctl (v$VERSION)"
 
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "Note: add $BIN to PATH.";; esac
+
+# --- ydotool (native click/type) --------------------------------------------
+# Needs the user in the `input` group (ydotool's own udev rule grants that
+# group access to /dev/uinput) and its daemon running as this user, not root.
+# Group membership only takes effect on the next login, so this can enable
+# the service now but can't make clicking/typing work in THIS session.
+if command -v ydotool >/dev/null && command -v systemctl >/dev/null; then
+  if ! id -nG "$USER" | grep -qw input; then
+    echo "Note: adding $USER to the 'input' group (needed for click/type)."
+    sudo usermod -aG input "$USER" 2>/dev/null \
+      && echo "Done. Log out and back in once for it to take effect." \
+      || echo "Could not add $USER to 'input' automatically: run 'sudo usermod -aG input $USER' yourself, then log out and back in."
+  fi
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable --now ydotool.service 2>/dev/null \
+    && echo "ydotool service enabled: systemctl --user status ydotool" \
+    || echo "ydotool service installed; it will start once the input group change above takes effect."
+fi
 
 # --- systemd user service --------------------------------------------------
 # A user service (never system/root): it needs the Wayland session, mic and

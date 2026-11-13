@@ -38,6 +38,10 @@ speech) is rewritten for Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
 - Natural neural voice with Piper, falling back to espeak-ng if no voice is installed.
 - Short sounds when listening starts and stops, so you know it heard you.
 - Screen reading (grim, tesseract) and web search when a request calls for it.
+- Native click, typing, key presses and window placement, driven by what it
+  reads off a screenshot — "click the Save button", "type my reply", "put
+  this on the left half of the screen".
+- Local file search ("find my resume").
 - Runs as a systemd user service.
 
 ## Requirements
@@ -45,7 +49,8 @@ speech) is rewritten for Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
 - Omarchy, or another Hyprland / Wayland session (v1 targets Omarchy).
 - System packages: `webkitgtk-6.0`, `gtk4-layer-shell`, `python-gobject`,
   `pipewire-pulse`, `grim`, `slurp`, `wl-clipboard`, `tesseract`,
-  `tesseract-data-eng`, `tesseract-data-por`, `espeak-ng`, `ffmpeg`.
+  `tesseract-data-eng`, `tesseract-data-por`, `espeak-ng`, `ffmpeg`, `fd`,
+  `ripgrep`, `ydotool`, `playerctl`.
 - Python 3.11 or newer.
 - A command-line assistant for the brain. By default Atticus calls the
   [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude`),
@@ -76,6 +81,11 @@ o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "/home/youruser/.local/bin/attic
 ```bash
 hyprctl reload && hyprctl configerrors
 ```
+
+Native click and typing need `ydotool`, which only works once your user is in
+the `input` group — `build.sh` adds you to it, but that takes effect on your
+**next login**, not this session. Log out and back in once after the first
+install.
 
 ## Usage
 

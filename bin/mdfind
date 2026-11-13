@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""macOS `mdfind` (Spotlight search) compatibility shim for Linux.
+
+The brain (atticus.py) searches files with:
+    mdfind -name "<words>"              filename search (default root: $HOME)
+    mdfind -onlyin <dir> "<words>"      content search, scoped to <dir>
+    mdfind "<words>"                    content search (default root: $HOME)
+
+Linux has no Spotlight index. Filename search maps to `fd`, one call per word
+with the results intersected, so word order and separator (underscore, dash,
+space, camelCase) don't matter, same as Spotlight's own tokenized matching;
+content search maps to `rg` (ripgrep). Both fall back to plain `find`/`grep`
+if not installed. `fd` and `rg` already skip .gitignore'd noise (.venv,
+node_modules, ...) by default, which keeps results close to what mdfind's own
+exclusion list would have skipped anyway. One matching path per line, like
+mdfind's own output.
+"""
+import os
+import shutil
+import subprocess
+import sys
+
+HOME = os.path.expanduser("~")
+TIMEOUT = 20
+
+
+def _run(cmd: list) -> str:
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+        return r.stdout
+    except Exception:
+        return ""
+
+
+def by_name(query: str, root: str) -> str:
+    words = query.split()
+    if not words:
+        return ""
+    if shutil.which("fd"):
+        sets = []
+        for w in words:
+            out = _run(["fd", "--hidden", "--glob", "--ignore-case", "--type", "f",
+                       f"*{w}*", root])
+            sets.append({p for p in out.splitlines() if p})
+        matched = set.intersection(*sets) if sets else set()
+        return "\n".join(sorted(matched)) + ("\n" if matched else "")
+    # find has no built-in "all words, any order" filter: chain -iname tests.
+    cmd = ["find", root, "-type", "f"]
+    for w in words:
+        cmd += ["-iname", f"*{w}*"]
+    return _run(cmd)
+
+
+def by_content(query: str, root: str) -> str:
+    if shutil.which("rg"):
+        return _run(["rg", "-l", "-i", "--no-messages", "--", query, root])
+    return _run(["grep", "-rlI", "-i", "--", query, root])
+
+
+def main(argv: list) -> int:
+    only_in = None
+    name_mode = False
+    rest = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "-onlyin" and i + 1 < len(argv):
+            only_in = os.path.expanduser(argv[i + 1]); i += 2; continue
+        if a == "-name":
+            name_mode = True; i += 1; continue
+        if a.startswith("-"):
+            i += 1; continue   # an mdfind flag we don't model: ignore, don't fail
+        rest.append(a); i += 1
+    query = " ".join(rest).strip().strip('"\'')
+    if not query:
+        return 0
+    root = only_in if only_in and os.path.isdir(only_in) else HOME
+    out = by_name(query, root) if name_mode else by_content(query, root)
+    sys.stdout.write(out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

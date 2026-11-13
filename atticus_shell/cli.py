@@ -210,6 +210,71 @@ def text_ocr(app: str, title: str = "") -> int:
             pass
 
 
+def hands_main(argv: list[str]) -> int:
+    """--hands <verb> ...: native click/type/key/scroll/placement, backed by
+    ydotool and Hyprland's dispatchers (see atticus_shell/hands.py). Prints
+    nothing on success; an error line on failure, which the brain's own
+    hands() reads and relays instead of claiming the action worked."""
+    from . import hands
+    if not argv:
+        return 1
+    verb, rest = argv[0], argv[1:]
+    if verb in ("click", "type", "press", "scroll", "drag") and not hands.available():
+        print("ydotool is not set up (install ydotool, enable the ydotool "
+              "user service, and make sure this user is in the input group)")
+        return 1
+    if verb == "click":
+        if len(rest) < 2:
+            return 1
+        try:
+            x, y = int(float(rest[0])), int(float(rest[1]))
+        except ValueError:
+            return 1
+        opts = {o.lower() for o in rest[2:]}
+        ok, msg = hands.click(x, y, button="right" if "right" in opts else "left",
+                              double="double" in opts)
+    elif verb == "type":
+        ok, msg = hands.type_text(" ".join(rest))
+    elif verb == "press":
+        if not rest:
+            return 1
+        times = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 1
+        ok, msg = hands.press(rest[0], times)
+    elif verb == "scroll":
+        if not rest:
+            return 1
+        amount = int(rest[1]) if len(rest) > 1 and rest[1].lstrip("-").isdigit() else 3
+        ok, msg = hands.scroll(rest[0], amount)
+    elif verb == "drag":
+        if len(rest) < 4:
+            return 1
+        try:
+            x1, y1, x2, y2 = (int(float(v)) for v in rest[:4])
+        except ValueError:
+            return 1
+        ok, msg = hands.drag(x1, y1, x2, y2)
+    elif verb == "place":
+        if len(rest) < 3:
+            return 1
+        app, where, mon_name = rest[0], rest[1], rest[2]
+        title = " ".join(rest[3:])
+        win = find_window(app, title)
+        if not win:
+            print(f'no window found for "{app}" {title}'.strip())
+            return 1
+        mons = {m["name"]: m for m in monitors()}
+        mon = mons.get(mon_name) or next(iter(mons.values()), None)
+        if not mon:
+            print("no display information available")
+            return 1
+        ok, msg = hands.place(win["address"], where, mon)
+    else:
+        return 1
+    if not ok and msg:
+        print(msg)
+    return 0 if ok else 1
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         return 2
@@ -226,6 +291,19 @@ def main(argv: list[str]) -> int:
         app = argv[1] if len(argv) > 1 else ""
         title = argv[2] if len(argv) > 2 else ""
         return text_ocr(app, title)
+    if cmd == "--hands":
+        return hands_main(argv[1:])
+    if cmd == "--type":
+        from . import hands
+        text = sys.stdin.read()
+        if not hands.available():
+            print("ydotool is not set up (install ydotool, enable the ydotool "
+                  "user service, and make sure this user is in the input group)")
+            return 1
+        ok, msg = hands.type_text(text)
+        if not ok:
+            print(msg or "Could not type.")
+        return 0 if ok else 1
     if cmd == "control" and len(argv) >= 2:
         from . import control
         rest = " ".join(argv[1:])

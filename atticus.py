@@ -1075,9 +1075,7 @@ def choices(options):
 
 
 def osa(script, *args, timeout=60):
-    if sys.platform != 'darwin': return ''   # Linux: no AppleScript; callers treat '' as "unavailable" and degrade
-    try: return subprocess.run(['osascript', '-e', script, *args], capture_output=True, text=True, timeout=timeout).stdout.strip()
-    except (subprocess.TimeoutExpired, OSError): return ''   # a stuck or missing Apple event must not hang or crash the ask
+    return ''   # there is no AppleScript here; what still calls this treats the empty answer as "unavailable"
 
 
 def osa_quote(text):
@@ -1161,22 +1159,11 @@ def system_ui_context():
 def screens():
     """[(name, x, y, w, h, built_in)], top-left coordinates like System Events uses; the first is the main one.
     built_in comes from macOS itself, so laptop vs monitor works on any Mac, any number of displays."""
-    if sys.platform != 'darwin':   # Linux: the native helper ($ATTICUS_APP --screens) reports the compositor's monitors
-        try:
-            out = subprocess.run([APP, '--screens'], capture_output=True, text=True, timeout=5).stdout
-            rows = json.loads(out or '[]')
-            return [(n, int(x), int(y), int(w), int(h), bool(b)) for n, x, y, w, h, b in rows if isinstance(n, str)]
-        except (OSError, ValueError, TypeError): return []
-    out = subprocess.run(['osascript', '-l', 'JavaScript', '-e', 'ObjC.import("AppKit"); ObjC.bindFunction("CGDisplayIsBuiltin", ["bool", ["unsigned int"]]); '
-        'var s=$.NSScreen.screens.js, H=s[0].frame.size.height; JSON.stringify(s.map(x=>[x.localizedName.js, x.frame.origin.x, '
-        'H-x.frame.origin.y-x.frame.size.height, x.frame.size.width, x.frame.size.height, '
-        '$.CGDisplayIsBuiltin(ObjC.unwrap(x.deviceDescription.objectForKey("NSScreenNumber")))]))'],
-        capture_output=True, text=True).stdout
-    try: rows = json.loads(out)
-    except ValueError: return []
-    if not isinstance(rows, list): return []
-    try: return [(n, int(x), int(y), int(w), int(h), bool(b)) for n, x, y, w, h, b in rows if isinstance(n, str)]
-    except (TypeError, ValueError, OverflowError): return []
+    try:
+        out = subprocess.run([APP, '--screens'], capture_output=True, text=True, timeout=5).stdout
+        rows = json.loads(out or '[]')
+        return [(n, int(x), int(y), int(w), int(h), bool(b)) for n, x, y, w, h, b in rows if isinstance(n, str)]
+    except (OSError, ValueError, TypeError): return []
 
 
 def describe(scr, fx=None, fy=None):
@@ -1196,14 +1183,11 @@ def describe(scr, fx=None, fy=None):
 
 def front():
     # Atticus.app passes the app the user was in when the user pressed the keys (its own windows can take focus, e.g. onboarding)
-    if sys.platform != 'darwin':   # Linux/Hyprland: the active window's class and title
-        front_env = os.environ.get('ATTICUS_FRONT')
-        try:
-            w = json.loads(subprocess.run(['hyprctl', '-j', 'activewindow'], capture_output=True, text=True, timeout=2).stdout or '{}')
-        except (OSError, ValueError, subprocess.TimeoutExpired): w = {}
-        return (front_env or w.get('class') or ''), (w.get('title') or '')
-    app = os.environ.get('ATTICUS_FRONT') or osa('tell application "System Events" to get name of first process whose frontmost is true')
-    return app, osa(f'tell application "System Events" to tell process "{app}" to get name of front window') if app else ''   # no front app: nothing to ask
+    front_env = os.environ.get('ATTICUS_FRONT')
+    try:
+        w = json.loads(subprocess.run(['hyprctl', '-j', 'activewindow'], capture_output=True, text=True, timeout=2).stdout or '{}')
+    except (OSError, ValueError, subprocess.TimeoutExpired): w = {}
+    return (front_env or w.get('class') or ''), (w.get('title') or '')
 
 
 ARRANGE = re.compile(r'--place\b|AXFullScreen|AXMinimized|\bset (bounds|position|size)\b|\bminiaturized\b', re.I)   # arranging windows is work the user sees
@@ -1551,28 +1535,13 @@ def installed_apps():
     global _APPS_CACHE
     if _APPS_CACHE[0] and time.monotonic() - _APPS_CACHE[0] < 3600:
         return _APPS_CACHE[1]
-    if sys.platform != 'darwin':   # the XDG desktop entries, by their display name
-        try:
-            from atticus_shell import assistant
-            names = {a['name'] for a in assistant.apps() if a['name'].strip()}
-        except Exception:
-            names = set()
-        _APPS_CACHE = (time.monotonic() if names else time.monotonic() - 3595, names)
-        return names
-    fallback = {f[:-4] for d in ('/Applications', '/System/Applications', '/System/Applications/Utilities', '/System/Library/CoreServices', HOME + '/Applications')
-                if os.path.isdir(d) for f in os.listdir(d) if f.endswith('.app')}
     try:
-        search = subprocess.Popen(['mdfind', 'kMDItemContentType == "com.apple.application-bundle"'],
-                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        found, _ = search.communicate(timeout=.08)
-        apps = {Path(path).stem for path in (found or '').splitlines() if path.rstrip('/').endswith('.app')} if not search.returncode else set()
-    except subprocess.TimeoutExpired:
-        search.kill(); search.communicate()
-        apps = set()
-    except OSError:
-        apps = set()
-    _APPS_CACHE = (time.monotonic() if apps else time.monotonic() - 3595, {a for a in apps | fallback if a.strip()})   # a stray ".app" folder has no name
-    return _APPS_CACHE[1]
+        from atticus_shell import assistant
+        names = {a['name'] for a in assistant.apps() if a['name'].strip()}
+    except Exception:
+        names = set()
+    _APPS_CACHE = (time.monotonic() if names else time.monotonic() - 3595, names)
+    return names
 
 
 def app_words(words):
@@ -3113,71 +3082,7 @@ def hands_linux(*args):
 
 def hands(*args):
     """The only model-facing native helper. No approval/force/app-changing flags are accepted."""
-    if sys.platform != 'darwin':
-        return hands_linux(*args)
-    if not args or args[0] not in HANDS_VERBS or any(a.startswith('--') for a in args[1:]):
-        return 'Use --hands see|menu|click|scroll|scroll-to|press|drag|type|type-after|wait; no flags.', False
-    if not wait_commit():
-        return 'The request was cancelled before the transcript was confirmed.', False
-    try:
-        if args[0] == 'see':
-            r = hands_call(list(args), timeout=2)
-            if r.returncode and 'Accessibility' in r.stdout: return need('accessibility', 'To read apps for this task.'), False
-            return with_icons(r.stdout.strip()), not r.returncode
-        if args[0] == 'menu':
-            r = hands_call(list(args), timeout=2)
-            if r.returncode and 'Accessibility' in r.stdout: return need('accessibility', 'To use app menus for this task.'), False
-            emit([line for line in r.stdout.splitlines() if line.startswith('▣ ')])
-            return '\n'.join(line for line in r.stdout.strip().splitlines() if not line.startswith('▣ ')), not r.returncode
-        if not os.path.exists(hands_state()) and not hands_map(os.environ.get('ATTICUS_FRONT', '')):
-            r = hands_call(['see'] + ([os.environ['ATTICUS_FRONT']] if os.environ.get('ATTICUS_FRONT') else []), timeout=6)   # a slow app, not a missing permission: say which
-            if 'Accessibility' in r.stdout: return need('accessibility', 'To click and type in apps for this task.'), False
-            if r.returncode or 'Accessibility' in r.stdout:
-                return r.stdout.strip() or 'Could not read the front app. Run see "<app>" for the app you mean.', False
-        denied = []
-        def authorize(check):
-            if check.get('args') != list(args) or not isinstance(check.get('labels'), list) or not isinstance(check.get('pid'), int):
-                denied.append('Could not resolve the hands action safely.')
-                return False
-            labels = check['labels']
-            if check.get('secure') and args[0] == 'type':
-                request = os.environ.get('ATTICUS_REQUEST', '')
-                ask = os.environ.get('ATTICUS_ASK')
-                if ask and os.path.exists(request_file(ask)):
-                    with open(request_file(ask)) as f:
-                        request = f.read()
-                if not (re.search(r'\b(type|enter|fill|paste)\b', request, re.I) and re.search(r'\b(password|passcode|pin|secret|secure|verification|one.time|otp|card|cvv|ssn|token|account|routing)\b', request, re.I)) or re.search(r"\b(don.t|do not|never)\s+(type|enter|fill|paste)\b", request, re.I):
-                    denied.append('Secure field: the user must explicitly request typing into it.')
-                    return False
-            if check.get('risky') and pref('safe', True) and not task_allowed('hands ' + args[0]):
-                what = ' → '.join(labels) or args[0]
-                if not os.environ.get('ATTICUS_ASK'):
-                    denied.append(f'Safe mode: {args[0]} "{what}" needs the user’s Allow card.')
-                    return False
-                question = f'{args[0].capitalize()} "{what[:120]}"?'
-                answer = ask_user({'q': question, 'cmd': f'{check["pid"]}: {args[0]} "{what[:300]}"', 'task': managed_agent()}, 60)
-                if answer == 'task' and managed_agent(): allow_for_task('hands ' + args[0])
-                elif answer != 'y':
-                    denied.append('The user said no. Do not try another way; say it was not done.')
-                    return False
-            return True
-        check, r = hands_action(list(args), authorize)
-        if denied:
-            return denied[0], False
-        if check is None and args[0] == 'click' and 'No visible control named' in r.stdout and not os.environ.get('ATTICUS_BAR'):
-            bar = menu_bar_click(args[1])
-            if bar:
-                return bar
-        if check is None or r.returncode:
-            return need('accessibility', 'To click and type in apps for this task.') if 'Accessibility' in r.stdout else r.stdout.strip(), False
-        if not r.returncode and check.get('windowID'):
-            target = {k: check[k] for k in ('pid', 'windowID', 'windowFrame', 'window', 'app')}
-            target['action'] = args[0]
-            target['direction'] = args[1] if args[0] == 'scroll' else ''
-            emit(['▣ ' + json.dumps(target)] + [line for line in r.stdout.splitlines() if line.startswith('@ ')])
-        return '\n'.join(line for line in r.stdout.strip().splitlines() if not line.startswith('@ ')), not r.returncode
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as e:
-        return f'Hands could not finish: {e}', False
+    return hands_linux(*args)
 
 
 def menu_bar_icons():
@@ -3421,44 +3326,12 @@ def routine_install_linux(row):
 
 
 def routine_install(row):
-    if sys.platform != 'darwin': return routine_install_linux(row)
-    path = routine_job_path(row['id']); os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-    job = {'Label': f"com.atticus.routine.{row['id']}", 'ProgramArguments': [sys.executable, ME, '--routine-fire', row['id']],
-           'ProcessType': 'Background', 'StandardOutPath': '/dev/null', 'StandardErrorPath': '/dev/null'}
-    if row['kind'] == 'interval':
-        job['StartInterval'] = row['every']
-    else:
-        hour, minute = map(int, row['at'].split(':'))
-        values = {'Hour': hour, 'Minute': minute}
-        job['StartCalendarInterval'] = [{**values, 'Weekday': day} for day in range(1, 6)] if row['days'] == 'weekdays' else values
-    with open(path + '.tmp', 'wb') as f: plistlib.dump(job, f)
-    os.chmod(path + '.tmp', 0o600); os.replace(path + '.tmp', path)
-    if not os.environ.get('ATTICUS_DIR'):
-        target = f'gui/{os.getuid()}'
-        subprocess.run(['/bin/launchctl', 'bootout', target, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        loaded = subprocess.run(['/bin/launchctl', 'bootstrap', target, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if loaded.returncode:
-            time.sleep(.2)
-            loaded = subprocess.run(['/bin/launchctl', 'bootstrap', target, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if loaded.returncode:
-            try: os.remove(path)
-            except FileNotFoundError: pass
-            raise OSError('Could not start the routine. Try again.')
+    return routine_install_linux(row)
 
 
 def routine_repair():
     """Replace weekday jobs written with the old Tuesday-Saturday values."""
-    if sys.platform != 'darwin': return   # a launchd-plist fix; systemd timers never had it
-    for row in routines():
-        if row.get('kind') != 'time' or row.get('days') != 'weekdays': continue
-        try:
-            with open(routine_job_path(row['id']), 'rb') as f: job = plistlib.load(f)
-            days = [value.get('Weekday') for value in job.get('StartCalendarInterval', [])]
-        except (OSError, ValueError, TypeError, AttributeError):
-            days = []
-        if days != list(range(1, 6)):
-            try: routine_install(row)
-            except (OSError, ValueError, KeyError, TypeError): pass
+    return   # nothing to repair: systemd timers keep their own state
 
 
 def routine_add(kind, when, ask, mode='cheapest', now=None, days='daily'):
@@ -3502,19 +3375,12 @@ def routine_remove(identifier):
         private_json(os.path.join(DIR, 'routines.json'), kept)
     finally:
         lock.close()
-    if sys.platform != 'darwin':
-        service, timer, name = routine_units(identifier)
-        if not os.environ.get('ATTICUS_TEST'): subprocess.run(['systemctl', '--user', 'disable', '--now', name], capture_output=True)
-        for f in (service, timer):
-            try: os.remove(f)
-            except FileNotFoundError: pass
-        if not os.environ.get('ATTICUS_TEST'): subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
-        return True
-    path = routine_job_path(identifier)
-    if not os.environ.get('ATTICUS_DIR'):
-        subprocess.run(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try: os.remove(path)
-    except FileNotFoundError: pass
+    service, timer, name = routine_units(identifier)
+    if not os.environ.get('ATTICUS_TEST'): subprocess.run(['systemctl', '--user', 'disable', '--now', name], capture_output=True)
+    for f in (service, timer):
+        try: os.remove(f)
+        except FileNotFoundError: pass
+    if not os.environ.get('ATTICUS_TEST'): subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
     return True
 
 
@@ -3552,16 +3418,9 @@ def routine_fire(identifier, now=None):
             fcntl.flock(f, fcntl.LOCK_EX); f.write(json.dumps({'id': identifier}) + '\n')
     finally:
         lock.close()
-    if sys.platform != 'darwin':   # tell the running shell there is a routine to run; it pops the queue and asks it aloud
-        if not os.environ.get('ATTICUS_TEST'):
-            try: subprocess.run([APP, 'control', 'routine'], capture_output=True, timeout=5)
-            except (OSError, subprocess.TimeoutExpired): pass
-        return True
-    if not os.environ.get('ATTICUS_DIR'):
-        wake = subprocess.run(['/bin/launchctl', 'kickstart', f'gui/{os.getuid()}/com.atticus.app'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if wake.returncode and subprocess.run(['/usr/bin/pgrep', '-f', APP], stdout=subprocess.DEVNULL).returncode:
-            bundle = APP.partition('/Contents/MacOS/')[0]
-            if bundle.endswith('.app'): subprocess.Popen(['/usr/bin/open', '-gj', bundle], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not os.environ.get('ATTICUS_TEST'):
+        try: subprocess.run([APP, 'control', 'routine'], capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired): pass
     return True
 
 
@@ -3601,11 +3460,9 @@ BUDGET = {'usd': 0.002, 'secs': 6}   # median of the last 50 AI asks must stay u
 
 
 def notify(text):
-    if sys.platform != 'darwin':
-        try: subprocess.run(['notify-send', '-a', 'Atticus', 'Atticus', str(text)[:2000]], capture_output=True, timeout=5)
-        except (OSError, subprocess.TimeoutExpired): pass
-        return
-    osa('on run argv\ndisplay notification (item 1 of argv) with title "Atticus" sound name "Glass"\nend run', text)
+    try: subprocess.run(['notify-send', '-a', 'Atticus', 'Atticus', str(text)[:2000]], capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired): pass
+    return
 
 
 def watch(what, then, app='', words='', mode='', phrase=''):

@@ -583,7 +583,7 @@ def main():
                     self._end_listen()
                     return False
                 # Nothing said after the keyword: don't hang open.
-                if not self._speech_seen and now - self._listen_started > (float(cfg.get("followUpSeconds", 3)) if self._followup else 5):
+                if not self._speech_seen and now - self._listen_started > (float(cfg.get("followUpSeconds", 2)) if self._followup else 5):
                     if self._vad and self._talking_now():
                         self._speech_seen = True     # began just as the time ran out
                         return True
@@ -682,7 +682,7 @@ def main():
             self._log("follow-up closed: silence")
             self.overlay.call("msg", "")
             self._resume_wake()
-            self._schedule_autohide()
+            self.overlay.hide()    # the wait after the answer was this silence
 
         def _end_listen(self):
             if not self.listening:
@@ -783,7 +783,8 @@ def main():
                 self._retry = False
                 self.overlay.call("msg", "")
                 self._resume_wake()   # nothing heard: go back to waiting for the keyword
-                self._schedule_autohide()
+                self._cancel_autohide()
+                self.overlay.hide()   # nobody spoke: nothing to show
                 return False
             # the voice turn already exists (from ui.listen()); fill it and run.
             self.overlay.call("words", text)
@@ -848,9 +849,14 @@ def main():
             self._resume_wake()
             self._schedule_autohide()
 
-        def _schedule_autohide(self, secs=14):
+        def _schedule_autohide(self, secs=None):
+            # The box goes away soon after the conversation ends; the wake
+            # word or the key brings it back. With the voice off the answer
+            # is only on screen, so it stays long enough to be read.
+            if secs is None:
+                secs = float(cfg.get("hideAfter", 2 if cfg.get("speak", True) else 14))
             self._cancel_autohide()
-            self._autohide_source = GLib.timeout_add_seconds(secs, self._autohide)
+            self._autohide_source = GLib.timeout_add(int(secs * 1000), self._autohide)
 
         def _cancel_autohide(self):
             if self._autohide_source:

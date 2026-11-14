@@ -143,7 +143,9 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `endSilence` | `0.9` | Seconds without a voice that end a request after the wake word. |
 | `instant` | `true` | Run everyday commands locally without the AI. |
 | `followUp` | `"always"` | After an answer, open the microphone again so a reply needs no wake word. `"question"`: only when Atticus ends on a question. `false`: never. |
-| `followUpSeconds` | `3` | How long that follow-up waits for a voice before closing in silence. |
+| `followUpSeconds` | `2` | How long the microphone stays open after an answer. Nobody speaks: it closes and the box goes away. |
+| `hideAfter` | `2` | Seconds the box stays on screen once a conversation is over. |
+| `screen` | `"never"` | `"auto"` reads the window in front before every request (the box blinks while the picture is taken). By default the screen is only looked at when the request needs it. |
 | `bargeIn` | `true` | Keep listening while Atticus speaks (through PipeWire echo cancellation) so talking over it stops the speech and is taken as the next request. |
 | `bargeVad` | `0.6` | How sure the voice detector must be that someone is talking over Atticus (0 to 1). Lower it if talking over it is not noticed. |
 | `model` | `"sonnet"` | Which Claude model answers: `"haiku"` (fastest), `"sonnet"`, `"opus"` or `"fable"`. Also in the model menu beside the text field. Everyday commands (time, timers, volume, lights) never wait for a model. |

@@ -431,6 +431,8 @@ def save_pref(key, value):
     private_json(PREFS, {**(values if isinstance(values, dict) else {}), key: value})
 
 
+SCREEN_READ = 'never'   # 'auto' reads the window in front before every request; a capture has to hide Atticus's box for a moment,
+                        # which shows as a blink each time. The model still looks at the screen when a request needs it.
 DEFAULT_MODEL = 'sonnet'   # what answers when nothing was chosen; the window's model menu changes it (settings: model)
 
 
@@ -6650,7 +6652,7 @@ def window_text(app='', offset=0, ocr=False):
 
 def screen_for(task, snap, text=''):
     """Thin text can need a picture; semantic visual requests can use --look."""
-    if pref('screen', 'auto') == 'never' or text.strip():
+    if pref('screen', SCREEN_READ) == 'never' or text.strip():
         return None
     if snap is None: return None
     if getattr(snap, 'started', False) is not True: return None
@@ -8248,7 +8250,7 @@ def main():
             summary_timing.update(secs=round(time.monotonic() - started, 3), status='failed')
     reading = threading.Thread(target=read_front, daemon=True)
     reading_started = False
-    if args == ['--wait'] and not selection_context() and pref('screen', 'auto') != 'never':
+    if args == ['--wait'] and not selection_context() and pref('screen', SCREEN_READ) != 'never':
         reading.start()   # key-down: the bounded read overlaps speech
         reading_started = True
     displays = threading.Thread(target=lambda: displays.screens.extend(screens()), daemon=True)   # key-down too: off the path to the model
@@ -8272,7 +8274,7 @@ def main():
         atexit.register(lambda p=path: os.path.exists(p) and os.remove(p))
     confirmed_task = task
     begin_turn(task)
-    if not reading_started and not selection_context() and pref('screen', 'auto') != 'never':
+    if not reading_started and not selection_context() and pref('screen', SCREEN_READ) != 'never':
         reading.start()
         reading_started = True
     if plain(task) in ('report feedback', 'report a bug'):
@@ -8340,7 +8342,7 @@ def main():
     previous_shortcut = failed_replay or previous_shortcut
     earlier = earlier_chat(turns)
     images, text = marked_images or None, ''
-    if not selected and not marked and pref('screen', 'auto') != 'never':
+    if not selected and not marked and pref('screen', SCREEN_READ) != 'never':
         waited = time.monotonic()
         reading.join(.3)
         added = round(time.monotonic() - waited, 3)

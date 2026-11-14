@@ -140,6 +140,13 @@ class Controls(unittest.TestCase):
         self.assertEqual(p("Que horas são?").kind, "time")
         self.assertEqual(p("que dia é hoje").kind, "date")
         self.assertEqual(p("para").kind, "hush")
+        for said in ("Pare.", "cala boca", "Cala a boca!", "chega", "pode parar", "desliga", "Fecha."):
+            self.assertEqual(p(said).kind, "hush", said)
+        # in a sentence, or about a device, it is not "be quiet"
+        for said in ("para a música", "pare o timer", "desliga a luz da sala", "fecha a cortina"):
+            self.assertNotEqual(getattr(p(said), "kind", None), "hush", said)
+        for said in ("desliga", "fecha"):
+            self.assertNotEqual(getattr(I.parse(said, home=True, device=True), "kind", None), "hush", said)
         self.assertEqual(p("bloqueia a tela").kind, "lock")
         self.assertEqual(p("desliga o bluetooth").args, {"which": "bluetooth", "on": False})
         self.assertEqual(p("turn wifi on").args, {"which": "wifi", "on": True})

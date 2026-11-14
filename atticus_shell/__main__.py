@@ -112,7 +112,10 @@ def main():
             self._answering = False
             self._followup = False
             self._barge_source = 0
-            self._barge_hits = []
+            self._barge_ticks = 0
+            self._barge_busy = False
+            self._barge_pending = None
+            self._speaking_text = ""
             self._barge_started = 0.0
             self._barge_peak = 0.0
             self._aec = False
@@ -125,6 +128,13 @@ def main():
                                    on_escape=self._cancel)
             self._autohide_source = 0
             self._floor = None
+            # The voice detector decides when a sentence has ended; loudness
+            # only decides if the detector cannot be loaded (_vad False).
+            self._vad = True
+            self._vad_ticks = 0
+            self._vad_busy = False
+            self._heard_word = False     # this recording starts with the wake word itself
+            self._about_device = False   # the last thing done or asked was about a smart-home device
             self.recorder = Recorder()
             self.transcriber = Transcriber()
             self.speaker = Speaker()
@@ -304,6 +314,7 @@ def main():
         def _on_wake(self):
             # Ignore the keyword while already listening or mid-answer.
             if self.listening or self.bridge.running():
+                self.wake.release()
                 return
             self._begin_listen(wake=True)
 
@@ -332,7 +343,8 @@ def main():
             from . import echo
             if not self.recorder.start(device=echo.SOURCE):
                 return
-            self._barge_hits = []
+            self._barge_ticks = 0
+            self._barge_busy = False
             self._barge_peak = 0.0
             self._barge_started = time.monotonic()
             self._barge_source = GLib.timeout_add(60, self._tick_barge)
@@ -342,50 +354,107 @@ def main():
                 return
             GLib.source_remove(self._barge_source)
             self._barge_source = 0
-            if os.environ.get("ATTICUS_DEBUG"):
-                self._log("not interrupted", loudest=round(self._barge_peak, 3))
             if not self.listening:
                 try:
-                    self.recorder.stop()
+                    heard = self.recorder.stop()
                 except Exception:
-                    pass
+                    heard = None
+                if os.environ.get("ATTICUS_DEBUG") and heard is not None:
+                    from .speech import speech_seconds
+                    path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "atticus-barge.f32")
+                    heard.tofile(path)
+                    self._log("not interrupted", loudest=round(self._barge_peak, 3),
+                              voice_secs=round(speech_seconds(heard, 0.6, gain=6.0), 2), saved=path)
 
         def _tick_barge(self):
-            hits = self._barge_hits
+            # Every ~0.2 s, ask the voice detector whether the last second of
+            # the echo-free microphone holds a person talking. Loudness alone
+            # cannot tell: through the canceller a voice arrives fainter than
+            # the fixed levels that separate it from what is left of the echo.
             self._barge_peak = max(self._barge_peak, self.recorder.level)
-            hits.append(self.recorder.level >= float(cfg.get("bargeLevel", 0.12)))
-            del hits[:-6]
-            # the first moments are the canceller still adapting to the room
-            if time.monotonic() - self._barge_started > 0.5 and sum(hits) >= 4:
-                self._barge_source = 0
-                self._barge_in()
-                return False
+            self._barge_ticks += 1
+            if (self._barge_ticks % 3 or self._barge_busy
+                    or time.monotonic() - self._barge_started < 0.6):
+                return True
+            self._barge_busy = True
+            token, audio = self._barge_started, self.recorder.tail(1.2)
+
+            def check():
+                from .speech import speech_seconds
+                secs = speech_seconds(audio, float(cfg.get("bargeVad", 0.6)), gain=6.0)
+                GLib.idle_add(self._barge_checked, token, secs)
+            threading.Thread(target=check, daemon=True).start()
             return True
 
+        def _barge_checked(self, token, secs):
+            self._barge_busy = False
+            if self._barge_source and token == self._barge_started and secs >= 0.3:
+                GLib.source_remove(self._barge_source)
+                self._barge_source = 0
+                self._barge_in()
+            return False
+
         def _barge_in(self):
-            self.recorder.keep_last(1.0)     # the words that interrupted, not the echo before them
-            answering = bool(self._prompt and self.bridge.running())
-            self._log("interrupted", answering_card=answering)
-            self._gen += 1                   # the interrupted speech must not reopen the mic when it ends
-            self.speaker.stop()
-            self._speaking = False
-            self._last_answer = ""
-            if not answering:
-                self._prompt = None
-                if self.bridge.running():
-                    self.bridge.cancel()
+            """A voice over Atticus's own. Hold the speech and record until
+            the person stops; what they said decides (_barge_decide): a
+            request is acted on, a leak of Atticus's own voice lets the
+            sentence carry on from where it was held."""
+            self.recorder.keep_last(1.6)     # the words that set this off, not everything before
+            self.speaker.pause()
+            self._barge_pending = {"spoken": self._speaking_text,
+                                   "answering": bool(self._prompt and self.bridge.running())}
+            self._log("holding speech: voice heard", loudest=round(self._barge_peak, 3))
             self._cancel_autohide()
             self.listening = True
-            self._answering = answering
+            self._answering = False
             self._followup = False
             self._wake_session = True        # ends on trailing silence
             self._speech_seen = True
             self._silence_since = 0.0
             self._floor = 0.02
+            self._vad_ticks, self._vad_busy = 0, False
             self._listen_started = time.monotonic()
-            if not answering:
-                self.overlay.call("listen")  # a fresh voice turn
+            self.overlay.call("level", 0.3)
             self._level_source = GLib.timeout_add(60, self._tick_level)
+
+        def _barge_transcribe(self, audio, gen):
+            try:
+                if os.environ.get("ATTICUS_DEBUG") and audio is not None:
+                    audio.tofile(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "atticus-held.f32"))
+                text = self.transcriber.transcribe(audio)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                text = ""
+            GLib.idle_add(self._barge_decide, text, gen)
+
+        def _barge_decide(self, text, gen):
+            pend, self._barge_pending = self._barge_pending, None
+            if gen != self._gen or not pend:
+                return False   # cancelled meanwhile; _cancel already stopped the voice
+            from . import echo
+            from .speech import is_phantom
+            said = echo.own_words((text or "").strip(), pend["spoken"])
+            if is_phantom(said):
+                said = ""
+            self._log("over the speech", heard=text, taken_as=said)
+            if not said:
+                self.speaker.resume()        # only its own voice: carry on
+                return False
+            self._gen += 1                   # the held speech must not reopen the mic when it ends
+            self.speaker.stop()
+            self._speaking = False
+            self._last_answer = ""
+            if pend["answering"] and self._prompt and self.bridge.running():
+                self._answering = True
+                return self._resolve_prompt(said, self._gen)
+            self._prompt = None
+            if self.bridge.running():
+                self.bridge.cancel()
+            self.overlay.call("listen", True)   # a fresh turn for what was said
+            self.overlay.call("words", said)
+            self._start_brain(said)
+            return False
 
         def _begin_listen(self, wake=False, followup=False):
             if self.listening:
@@ -394,6 +463,8 @@ def main():
             # followup: the mic opened by itself after an answer. If nobody
             # speaks it closes without a sound and nothing is transcribed.
             self._followup = followup
+            if not followup:
+                self._about_device = False   # a new conversation
             self._log("listening", wake=wake, followup=followup)
             # Barge-in: starting a new recording interrupts whatever Atticus is
             # doing right now — speaking an answer, or waiting on an interactive
@@ -405,6 +476,10 @@ def main():
             self._answering = False
             self._prompt = None
             self._gen += 1
+            # After the wake word the recording carries on from the stream
+            # that heard it, so "Siri, que horas são" said in one breath is
+            # all there; the word is taken off the text afterwards.
+            stream = self.wake.take() if self.wake and wake and not followup else None
             if self.wake:
                 self.wake.pause()   # don't let the spotter fight the command mic
             self._cancel_autohide()
@@ -414,16 +489,18 @@ def main():
             was_hidden = not self.overlay.window.get_visible()
             self.overlay.present()
             self.earcons.play("start")   # rising blip: "I'm listening"
-            if not self.recorder.start():
+            if not self.recorder.start(stream=stream):
                 self.overlay.call("msg", "No microphone available.")
                 self._resume_wake()
                 self._schedule_autohide()
                 return
             self.listening = True
+            self._heard_word = bool(stream)
             self._wake_session = wake
             self._speech_seen = False
             self._silence_since = 0.0
             self._floor = None
+            self._vad_ticks, self._vad_busy = 0, False
             self._listen_started = time.monotonic()
             if was_hidden:
                 self.overlay.call("reset")     # clear any previous conversation
@@ -441,30 +518,16 @@ def main():
                 # Grace window: ignore the opening earcon bleeding into the mic.
                 if now - self._listen_started < 0.5:
                     return True
-                # Adaptive noise floor: track the quietest level, creep up slowly.
-                if self._floor is None or level < self._floor:
-                    self._floor = level
-                else:
-                    self._floor += (level - self._floor) * 0.02
-                # Gates sit just above the room's own noise so a whisper
-                # still counts as speech in a quiet room (the floors used to
-                # be fixed at a normal speaking level).
-                speech_gate = max(0.06, self._floor * 1.6 + 0.035)
-                silence_gate = max(0.045, self._floor * 1.3 + 0.012)
-                if level >= speech_gate:
-                    self._speech_seen = True
-                    self._silence_since = 0.0
-                elif self._speech_seen and level <= silence_gate:
-                    if not self._silence_since:
-                        self._silence_since = now
-                    elif now - self._silence_since > 0.9:
-                        if os.environ.get("ATTICUS_DEBUG"):
-                            print(f"[listen] endpoint: floor={self._floor:.3f} "
-                                  f"gate={silence_gate:.3f}", flush=True)
-                        self._end_listen()
-                        return False
+                if self._vad:
+                    self._watch_voice(now - self._listen_started)
+                elif self._loudness_says_done(level, now):
+                    self._end_listen()
+                    return False
                 # Nothing said after the keyword: don't hang open.
                 if not self._speech_seen and now - self._listen_started > (float(cfg.get("followUpSeconds", 3)) if self._followup else 5):
+                    if self._vad and self._talking_now():
+                        self._speech_seen = True     # began just as the time ran out
+                        return True
                     if self._followup:
                         self._close_followup()
                     else:
@@ -474,6 +537,68 @@ def main():
                     self._end_listen()
                     return False
             return True
+
+        def _watch_voice(self, since):
+            """Every ~0.2 s, ask the voice detector how long ago a voice was
+            last heard in the last two seconds of this recording. The first
+            0.3 s are left out: after the wake word they still hold its last
+            sound, which is not yet the request."""
+            self._vad_ticks += 1
+            if self._vad_ticks % 3 or self._vad_busy:
+                return
+            self._vad_busy = True
+            gen, audio = self._gen, self.recorder.tail(max(0.05, min(2.0, since - 0.3)))
+
+            def check():
+                from .speech import SAMPLE_RATE, voice_ago
+                GLib.idle_add(self._voice_checked, gen, voice_ago(audio), audio.size / SAMPLE_RATE)
+            threading.Thread(target=check, daemon=True).start()
+
+        def _talking_now(self):
+            from .speech import voice_ago
+            return 0 <= voice_ago(self.recorder.tail(1.0)) < 0.4
+
+        def _voice_checked(self, gen, ago, span):
+            self._vad_busy = False
+            if gen != self._gen or not self.listening or not self._wake_session:
+                return False
+            if ago < 0:
+                self._vad = False        # no detector: loudness decides from here on
+                return False
+            if ago < span - 0.05:
+                self._speech_seen = True
+            # Over Atticus's own voice people say short things ("para"), and
+            # the speech is being held meanwhile: a shorter pause ends it.
+            limit = 0.6 if self._barge_pending else float(cfg.get("endSilence", 0.9) or 0.9)
+            if self._speech_seen and ago >= limit:
+                if os.environ.get("ATTICUS_DEBUG"):
+                    print(f"[listen] endpoint: no voice for {ago:.2f} s", flush=True)
+                self._end_listen()
+            return False
+
+        def _loudness_says_done(self, level, now):
+            # Adaptive noise floor: track the quietest level, creep up slowly.
+            if self._floor is None or level < self._floor:
+                self._floor = level
+            else:
+                self._floor += (level - self._floor) * 0.02
+            # Gates sit just above the room's own noise so a whisper
+            # still counts as speech in a quiet room (the floors used to
+            # be fixed at a normal speaking level).
+            speech_gate = max(0.06, self._floor * 1.6 + 0.035)
+            silence_gate = max(0.045, self._floor * 1.3 + 0.012)
+            if level >= speech_gate:
+                self._speech_seen = True
+                self._silence_since = 0.0
+            elif self._speech_seen and level <= silence_gate:
+                if not self._silence_since:
+                    self._silence_since = now
+                elif now - self._silence_since > 0.9:
+                    if os.environ.get("ATTICUS_DEBUG"):
+                        print(f"[listen] endpoint: floor={self._floor:.3f} "
+                              f"gate={silence_gate:.3f}", flush=True)
+                    return True
+            return False
 
         def _stop_recording(self):
             """Stop the mic and level ticker, if running. Returns the captured
@@ -506,17 +631,50 @@ def main():
             answering = self._answering
             gen = self._gen   # this session's generation; _begin_listen/_cancel bump it
             audio = self._stop_recording()
+            guard, self._followup = self._followup, False
+            word, self._heard_word = self._heard_word and self.wake and self.wake.word, False
+            lead = self.recorder.lead
+            if self._barge_pending:      # spoke over the answer: decide once it is transcribed
+                threading.Thread(target=self._barge_transcribe, args=(audio, gen), daemon=True).start()
+                return
             self.earcons.play("end")     # falling blip: "got it"
             if answering:
                 threading.Thread(target=self._transcribe_answer, args=(audio, gen),
                                  daemon=True).start()
                 return
             self.overlay.call("think")
-            threading.Thread(target=self._transcribe_and_run, args=(audio, gen), daemon=True).start()
+            threading.Thread(target=self._transcribe_and_run, args=(audio, gen, guard, word, lead), daemon=True).start()
 
-        def _transcribe_and_run(self, audio, gen):
+        def _transcribe_and_run(self, audio, gen, guard=False, word="", lead=0.0):
             try:
-                text = self.transcriber.transcribe(audio)
+                # The mic that opened by itself after an answer must not turn
+                # room noise into a request: no voice in it, nothing happened.
+                if guard and audio is not None:
+                    from .speech import speech_seconds
+                    secs = speech_seconds(audio, 0.3)
+                    if 0 <= secs < 0.25:
+                        self._log("follow-up dropped: no voice in it")
+                        audio = None
+                text = self.transcriber.transcribe(audio) if audio is not None else ""
+                if word and text:
+                    # The recording began with the wake word, which helps a
+                    # one-word request be understood ("Siri, para") and is
+                    # then taken off. When it was written as something else
+                    # ("Cidade, para") there is nothing to take off, so the
+                    # part recorded after the word is read again by itself.
+                    from .speech import SAMPLE_RATE, is_phantom
+                    from .wakeword import said
+                    asked = said(text, word)
+                    if asked == text:
+                        asked = self.transcriber.transcribe(audio[int(lead * SAMPLE_RATE):])
+                        asked = "" if is_phantom(asked) else asked
+                    self._log("after the wake word", heard=text, asked=asked)
+                    text = asked
+                if guard and text:
+                    from .speech import is_phantom
+                    if is_phantom(text):
+                        self._log("follow-up dropped: noise read as words", text=text)
+                        text = ""
             except Exception:
                 import traceback
                 traceback.print_exc()
@@ -549,6 +707,7 @@ def main():
             self._speak_gen = self._gen   # tag this playback to the current turn
             self._last_answer = text
             self._log("answer", text=text[:200])
+            self._speaking_text = text
             self.speaker.speak(text, self.transcriber.last_language,
                                done=self._on_speech_done)
             self._arm_barge()
@@ -616,6 +775,9 @@ def main():
 
         def _submit_typed(self, text):
             # a typed/relayed ask has no turn yet: create one (keep box open), then run.
+            self._disarm_barge()
+            self._stop_recording()         # an open follow-up mic must not record the reply
+            self._followup = False
             was_hidden = not self.overlay.window.get_visible()
             self.overlay.present()
             if was_hidden:
@@ -633,7 +795,8 @@ def main():
             if cfg.get("instant", True):
                 try:
                     from . import intents
-                    intent = intents.parse(text)
+                    # "desliga" by itself ends the conversation, unless a device was just being talked about
+                    intent = intents.parse(text, device=self._about_device)
                 except Exception:
                     import traceback
                     traceback.print_exc()
@@ -655,6 +818,7 @@ def main():
             if gen != self._gen:
                 return False   # cancelled or superseded while it ran
             self._log("instant", kind=intent.kind, reply=reply)
+            self._about_device = intent.kind.startswith("home")
             if reply is None:
                 self._ask_brain(text)   # could not do it locally after all
                 return False
@@ -668,6 +832,7 @@ def main():
             self._speak_gen = self._gen
             # a state answer invites a reply ("liga"); a plain confirmation does not
             self._last_answer = reply if intent.kind == "home_state" or reply.rstrip().endswith("?") else ""
+            self._speaking_text = reply
             self.speaker.speak(reply, intent.lang, done=self._on_speech_done)
             self._arm_barge()
             return False
@@ -678,6 +843,7 @@ def main():
 
         def _cancel(self):
             self._gen += 1   # invalidate any transcription still in flight
+            self._barge_pending = None
             self._disarm_barge()
             self._stop_recording()
             self.speaker.stop()
@@ -712,6 +878,7 @@ def main():
                 GLib.idle_add(self._begin_answer_listen)
             # If voice is off or unavailable the callback still fires, so the
             # mic opens right away and the card can be answered by voice or click.
+            self._speaking_text = text
             self.speaker.speak(text, lang, done=after)
             self._arm_barge()
 
@@ -760,6 +927,7 @@ def main():
             self._speech_seen = False
             self._silence_since = 0.0
             self._floor = None
+            self._vad_ticks, self._vad_busy = 0, False
             self._listen_started = time.monotonic()
             self.earcons.play("start")   # same cue as a normal listen turn
             self._level_source = GLib.timeout_add(60, self._tick_level)

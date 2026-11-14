@@ -253,9 +253,20 @@ def _lang(folded: str) -> str:
     return "en" if en > pt else "pt"
 
 
-def parse(text: str, now: float | None = None, home: bool | None = None) -> Intent | None:
+# Said by themselves these end the conversation at once. The second group
+# also names something to do to a device ("desliga" right after "o ar está
+# ligado"), so it only ends the conversation when no device was being
+# talked about.
+_HUSH = (r"(?:pode |ja |ok |okay |ta bom |ta |agora )?(?:para|pare|parar|chega|silencio|quieto|quieta|calado|calada|"
+         r"cala a boca|cala boca|cale a boca|cale boca|fica quieto|fica quieta|para de falar|pode parar|encerra|encerrar|"
+         r"stop|quiet|shut up|be quiet|stop talking|enough)(?: com isso| ai| agora| por favor)?")
+_HUSH_UNLESS_DEVICE = r"(?:pode )?(?:desliga|desligue|desligar|fecha|feche|fechar|sai|saia|sair|turn off|close|go away)(?: ai| isso| agora)?"
+
+
+def parse(text: str, now: float | None = None, home: bool | None = None, device: bool = False) -> Intent | None:
     """`home`: whether a smart-home server is configured (None = look it up).
-    Without one, "liga a luz" is not an instant command and goes to the model."""
+    Without one, "liga a luz" is not an instant command and goes to the model.
+    `device`: the conversation is about a device right now."""
     now = time.time() if now is None else now
     original = clean(text)
     t = fold(original)
@@ -276,7 +287,7 @@ def parse(text: str, now: float | None = None, home: bool | None = None) -> Inte
     I = lambda kind, **args: Intent(kind, lang, args)
 
     # --- stop talking ---
-    if re.fullmatch(r"(para|pare|parar|chega|silencio|cala a boca|fica quieto|stop|quiet|shut up|be quiet|para de falar|stop talking)", t):
+    if re.fullmatch(_HUSH, t) or not device and re.fullmatch(_HUSH_UNLESS_DEVICE, t):
         return I("hush")
 
     # --- time and date ---

@@ -30,6 +30,46 @@ def ensure() -> bool:
         return False
     if ready():
         return True
+    # No automatic gain: with nobody talking it turns up what is left of
+    # Atticus's own voice until it sounds like someone speaking.
     _pactl("load-module", "module-echo-cancel", "aec_method=webrtc",
-           f"source_name={SOURCE}", f"sink_name={SINK}")
+           f"source_name={SOURCE}", f"sink_name={SINK}",
+           'aec_args="webrtc.gain_control=false"')
     return ready()
+
+
+def own_words(heard: str, spoken: str) -> str:
+    """What is left of a transcript after removing Atticus's own words. Some
+    of its voice always leaks past the canceller; a transcript that is just a
+    run of the sentence being spoken ("está ligado em 18 graus") is that
+    leak, not the user. Returns "" for pure echo, otherwise the transcript
+    with any leading echo cut off ("ligado em 18 graus liga a luz" →
+    "liga a luz")."""
+    import difflib
+    import re
+    import unicodedata
+
+    def words(s):
+        # numbers apart from letters: "17:12" spoken comes back written "17h12"
+        s = unicodedata.normalize("NFD", s.lower())
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return [w for w in re.findall(r"\d+|[^\W\d_]+", s) if w != "h"]
+    raw = re.findall(r"\S+", heard)
+    h, s = words(heard), words(spoken)
+    if not h:
+        return ""
+    if len(raw) != len(h):          # punctuation split differently: compare, do not cut
+        raw = h
+    match = difflib.SequenceMatcher(None, h, s, autojunk=False)
+    m = match.find_longest_match(0, len(h), 0, len(s))
+    if m.size >= 2 and m.size >= 0.7 * len(h):
+        return ""
+    # the sentence with a word or two heard wrong in the middle is still the sentence
+    same = sum(b.size for b in match.get_matching_blocks())
+    if len(h) >= 3 and same >= 0.75 * len(h) and not (m.size >= 3 and m.a == 0 and len(h) - m.size >= 2):
+        return ""
+    if len(h) == 1 and len(s) > 1 and h[0] in s and len(h[0]) > 3:
+        return ""
+    if m.size >= 3 and m.a == 0:    # starts with a run of the spoken sentence
+        return " ".join(raw[m.size:])
+    return " ".join(raw) if raw is h else heard.strip()

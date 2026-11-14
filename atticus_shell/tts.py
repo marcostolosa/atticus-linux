@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -64,7 +65,8 @@ def _player_cmd(rate: int, device: Optional[str] = None) -> Optional[list]:
     """A raw-PCM player: s16le mono at the voice's sample rate."""
     if shutil.which("paplay"):
         return ["paplay", "--raw", f"--rate={rate}", "--channels=1",
-                "--format=s16le", *([f"--device={device}"] if device else [])]
+                "--format=s16le", "--latency-msec=60",   # little buffered: pause and stop act at once
+                *([f"--device={device}"] if device else [])]
     if shutil.which("pw-cat"):
         return ["pw-cat", "--playback", "--rate", str(rate), "--channels", "1",
                 "--format", "s16", "-"]
@@ -268,12 +270,29 @@ class Speaker:
             except OSError:
                 self._procs = []
 
+    def _signal(self, sig):
+        with self._lock:
+            for p in self._procs:
+                if p and p.poll() is None:
+                    try:
+                        p.send_signal(sig)
+                    except Exception:
+                        pass
+
+    def pause(self):
+        """Hold the voice mid-sentence (resume() carries on from there)."""
+        self._signal(signal.SIGSTOP)
+
+    def resume(self):
+        self._signal(signal.SIGCONT)
+
     def stop(self):
         with self._lock:
             for p in self._procs:
                 if p and p.poll() is None:
                     try:
                         p.terminate()
+                        p.send_signal(signal.SIGCONT)   # a paused player only dies once continued
                     except Exception:
                         pass
             self._procs = []

@@ -23,16 +23,30 @@ from .settings import get as _setting
 SAMPLE_RATE = 16000
 
 
+LATENCY_MS = 40   # how often the recorder hands over what it heard
+
+
 def _record_cmd(device: Optional[str] = None) -> Optional[list[str]]:
+    # The latency is asked for by name. Left to itself parecord hands audio
+    # over two seconds at a time (measured: the first sample 2034 ms after it
+    # starts, then 64000 bytes every 2 s), so the level, the end of a
+    # sentence and the wake word were all being judged up to two seconds late.
     if shutil.which("parecord"):
         return ["parecord", "--raw", f"--rate={SAMPLE_RATE}", "--channels=1", "--format=s16le",
-                *([f"--device={device}"] if device else [])]
+                f"--latency-msec={LATENCY_MS}", *([f"--device={device}"] if device else [])]
     if shutil.which("pw-record"):
         return ["pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1",
-                "--format", "s16", "--raw", "-"]
+                "--format", "s16", "--latency", f"{LATENCY_MS}ms", "--raw", "-"]
     if shutil.which("arecord"):
         return ["arecord", "-q", "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "1", "-t", "raw"]
     return None
+
+
+def _end(proc) -> None:
+    try:
+        proc.terminate()
+    except Exception:
+        pass
 
 
 class Recorder:
@@ -44,6 +58,7 @@ class Recorder:
         self._thread: Optional[threading.Thread] = None
         self._level = 0.0
         self._running = False
+        self.lead = 0.0   # seconds of audio a handed-on stream arrived with
 
     @property
     def level(self) -> float:
@@ -53,18 +68,29 @@ class Recorder:
     def available(self) -> bool:
         return _record_cmd() is not None
 
-    def start(self, device: Optional[str] = None) -> bool:
+    def start(self, device: Optional[str] = None, stream=None) -> bool:
+        """stream: (process, audio so far) of a recorder that is already
+        running — the one that just heard the wake word. Carrying on with it
+        loses nothing of what is said straight after the word; starting a new
+        one would miss the time it takes to open."""
         if self._running:
+            if stream:
+                _end(stream[0])
             return True
-        cmd = _record_cmd(device)
-        if not cmd:
-            return False
-        try:
-            self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                          stderr=subprocess.DEVNULL)
-        except OSError:
-            return False
-        self._chunks = []
+        self._chunks, self.lead = [], 0.0
+        if stream:
+            self._proc, pcm = stream
+            self._chunks = [pcm[i:i + 2048] for i in range(0, len(pcm), 2048)]
+            self.lead = len(pcm) / 2 / SAMPLE_RATE
+        else:
+            cmd = _record_cmd(device)
+            if not cmd:
+                return False
+            try:
+                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                              stderr=subprocess.DEVNULL)
+            except OSError:
+                return False
         self._running = True
         self._thread = threading.Thread(target=self._pump, daemon=True)
         self._thread.start()
@@ -89,6 +115,12 @@ class Recorder:
         keep = max(1, int(seconds * SAMPLE_RATE * 2 / 2048))
         del self._chunks[:-keep]
 
+    def tail(self, seconds: float) -> np.ndarray:
+        """The most recent audio, while still recording."""
+        keep = max(1, int(seconds * SAMPLE_RATE * 2 / 2048))
+        pcm = b"".join(self._chunks[-keep:])
+        return np.frombuffer(pcm[:len(pcm) // 2 * 2], dtype=np.int16).astype(np.float32) / 32768.0
+
     def stop(self) -> np.ndarray:
         self._running = False
         if self._proc:
@@ -107,6 +139,55 @@ class Recorder:
         if not pcm:
             return np.zeros(0, dtype=np.float32)
         return np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+def speech_seconds(audio: np.ndarray, threshold: float = 0.5, gain: float = 0.0) -> float:
+    """How much of this audio is a person talking, by a voice detector (the
+    Silero model that ships with faster-whisper) rather than by loudness: an
+    air conditioner is loud and is not speech, a whisper is faint and is.
+    gain 0 brings the audio to a steady level first; a fixed gain keeps quiet
+    things quiet. Returns -1 when the detector is unavailable."""
+    if audio.size < SAMPLE_RATE // 4:
+        return 0.0
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+        x = level_audio(audio) if not gain else np.clip(audio * gain, -1.0, 1.0).astype(np.float32)
+        spans = get_speech_timestamps(x, VadOptions(threshold=threshold, min_speech_duration_ms=150,
+                                                    min_silence_duration_ms=200, speech_pad_ms=0))
+        return sum(t["end"] - t["start"] for t in spans) / SAMPLE_RATE
+    except Exception:
+        return -1.0
+
+
+def voice_ago(audio: np.ndarray, threshold: float = 0.5) -> float:
+    """Seconds since a voice was last heard in this audio: near 0 while
+    someone is still talking at its end, its whole length when nobody spoke
+    in it. This is what ends a sentence: a pause is told from a fan by what
+    it is, not by how loud it is. Returns -1 when the detector is unavailable."""
+    total = audio.size / SAMPLE_RATE
+    if audio.size < SAMPLE_RATE // 4:
+        return total
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+        spans = get_speech_timestamps(level_audio(audio), VadOptions(
+            threshold=threshold, min_speech_duration_ms=120, min_silence_duration_ms=100, speech_pad_ms=0))
+        return total - spans[-1]["end"] / SAMPLE_RATE if spans else total
+    except Exception:
+        return -1.0
+
+
+# What Whisper writes when handed noise with no words in it. From a microphone
+# that opened by itself these are never taken as something the user asked.
+_PHANTOMS = {"tchau", "tchau tchau", "obrigado", "obrigada", "e ai", "ate a proxima", "o que e isso",
+             "legendas pela comunidade amara org", "thank you", "thanks for watching", "bye", "you"}
+
+
+def is_phantom(text: str) -> bool:
+    import re
+    import unicodedata
+    t = unicodedata.normalize("NFD", text.lower())
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    return " ".join(re.findall(r"\w+", t)) in _PHANTOMS
 
 
 RUMBLE_HZ = 150   # fans and air conditioners live below this; voices do not
@@ -141,6 +222,61 @@ def level_audio(audio: np.ndarray, target: float = 0.25) -> np.ndarray:
         return audio
     peak = float(np.percentile(np.abs(audio), 99.9)) or 1e-6
     return np.clip(audio * min(target / peak, 60.0), -1.0, 1.0).astype(np.float32)
+
+
+# Whisper spells an unusual name the way a common word sounds ("Luz do Dom"
+# comes back as "luz do dó"). Told beforehand which names to expect, it writes
+# them right. These are the names: the user's own list (settings
+# `asrVocabulary`) and what their smart-home devices are called.
+_NAMED_ALOUD = ("light", "climate", "fan", "cover", "lock", "media_player", "vacuum", "scene", "humidifier")
+_SOMETIMES = ("switch", "input_boolean", "script")   # plugs have spoken names; dozens of option toggles do not
+_names = {"at": 0.0, "list": [], "busy": False}
+_names_lock = threading.Lock()
+
+
+def _fetch_names() -> None:
+    try:
+        from . import home
+        rows = home.entities() if home.configured() else []
+        named = [r["name"] for d in _NAMED_ALOUD for r in rows if r["domain"] == d]
+        extra = [r["name"] for d in _SOMETIMES for r in rows if r["domain"] == d]
+        _names["list"] = named + (extra if len(extra) <= 12 else [])
+    except Exception:
+        pass
+    finally:
+        import time
+        _names["at"], _names["busy"] = time.monotonic(), False
+
+
+def spoken_names(refresh: bool = False) -> list[str]:
+    """What the user's devices are called. Never waits on the network unless
+    asked to (refresh): it answers with what it last knew and looks again in
+    the background every ten minutes."""
+    import time
+    if refresh:
+        _fetch_names()
+    elif time.monotonic() - _names["at"] > 600 or not _names["at"]:
+        with _names_lock:
+            start, _names["busy"] = not _names["busy"], True
+        if start:
+            threading.Thread(target=_fetch_names, daemon=True).start()
+    return list(_names["list"])
+
+
+def vocabulary(refresh: bool = False, limit: int = 40) -> list[str]:
+    """The names worth telling the recognizer about, the user's own first. A
+    name that adds no new word is left out, and the list stays short: a long
+    one starts putting its words where they were not said."""
+    own = _setting("asrVocabulary") or []
+    out, seen, size = [], set(), 0
+    for name in [*(own if isinstance(own, list) else []), *spoken_names(refresh)]:
+        said = str(name).split()
+        if not {w.lower() for w in said} - seen or size + len(said) > limit:
+            continue
+        seen |= {w.lower() for w in said}
+        size += len(said)
+        out.append(" ".join(said))
+    return out
 
 
 class RemoteWhisper:
@@ -276,11 +412,17 @@ class Transcriber:
             self.last_language, self.last_engine = lang, "remote"
             return text
         self.last_engine = "local"
+        return self.transcribe_local(audio, language, vocabulary() if _setting("asrBias", True) else [])
+
+    def transcribe_local(self, audio: np.ndarray, language: Optional[str] = None,
+                         names: Optional[list[str]] = None) -> str:
+        """The model on this machine. `names` are the ones it should expect."""
         self.load()
         # No voice-activity filter: it is tuned for normal speech and drops whispers.
         segments, info = self._model.transcribe(
             audio, language=language or self.language, vad_filter=False,
-            beam_size=5, condition_on_previous_text=False)
+            beam_size=5, condition_on_previous_text=False,
+            hotwords=", ".join(names) if names else None)
         text = " ".join(seg.text.strip() for seg in segments).strip()
         self.last_language = getattr(info, "language", None)
         return text

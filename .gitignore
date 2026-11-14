@@ -31,3 +31,7 @@ atticus.sock
 
 # Knowledge-graph output (regenerate with graphify)
 /graphify-out/
+
+# Working notes for whoever is developing (roadmap, measurements, house rules)
+/AGENTS.md
+/DESIGN.md

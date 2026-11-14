@@ -15,6 +15,7 @@ Audio: PipeWire parecord, 16 kHz mono s16le (same as the command recorder).
 """
 from __future__ import annotations
 
+import collections
 import os
 import re
 import subprocess
@@ -26,7 +27,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from .speech import _record_cmd, SAMPLE_RATE
+from .speech import _end, _record_cmd, SAMPLE_RATE
 from .settings import get as _setting
 
 RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
@@ -49,6 +50,13 @@ _HALLUCINATIONS = {
     "amara org", "obrigado por assistir", "inscreva se no canal", "ate o proximo video",
     "thanks for watching", "subtitles by the amara org community", "you",
 }
+
+
+# The stream handed on after the word starts this long before it was heard, so
+# it holds the whole word: a recognizer given half of it ("ri, que horas são")
+# writes something else in its place, given all of it writes the word, which
+# said() then takes off.
+PREROLL = 1.5
 
 
 def _norm(s: str) -> str:
@@ -85,6 +93,24 @@ def model_path(word: str) -> Optional[str]:
     return str(cand) if cand.exists() else None
 
 
+def said(text: str, word: str) -> str:
+    """What was asked, without the wake word it began with ("Siri, que horas
+    são?" -> "que horas são?"). Anything the recording caught before the word
+    goes with it. Text the word is not in is returned as it is."""
+    word = _norm(word)
+    targets = {_norm(v) for v in VARIANTS.get(word, ())} | {word}
+    parts = text.split()
+    heard = [_norm(w).replace(" ", "") for w in parts]
+    best = 0
+    for t in targets:
+        toks = t.split()
+        for i in range(min(len(heard), 5) - len(toks) + 1):
+            if all(heard[i + j] == k or len(k) > 3 and _lev1(heard[i + j], k) for j, k in enumerate(toks)):
+                best = max(best, i + len(toks))
+    rest = " ".join(parts[best:]).lstrip(" ,.;:!?-")
+    return rest[:1].upper() + rest[1:] if best and rest else (rest if best else text)
+
+
 class WakeListener:
     def __init__(self, on_wake: Callable[[], None], word: str = "siri",
                  model: Optional[str] = None, variants: Optional[set] = None):
@@ -106,6 +132,7 @@ class WakeListener:
         self._running = False
         self._paused = False
         self._last_fire = 0.0
+        self._handoff = None   # (recorder process, its last seconds) once the word is heard
 
     @property
     def engine(self) -> str:
@@ -171,13 +198,32 @@ class WakeListener:
         except OSError:
             return None
 
-    def _fire_if_ready(self):
+    def _fire_if_ready(self, recent: Optional[bytes] = None):
+        """recent: the audio up to this moment, when the microphone stream
+        can be handed to whoever listens next (take). The loop then stops
+        reading it, so the request that follows the word is recorded from
+        the same stream with nothing missing in between."""
         from gi.repository import GLib
         now = time.monotonic()
         if now - self._last_fire < 2.0:
             return
         self._last_fire = now
+        if recent is not None and self._proc is not None:
+            self._paused = True
+            self._handoff, self._proc = (self._proc, recent), None
         GLib.idle_add(self._fire)
+
+    def take(self):
+        """The stream that heard the word, as (process, audio so far), once."""
+        handoff, self._handoff = self._handoff, None
+        return handoff
+
+    def release(self):
+        """The word was heard but nobody is going to listen: back to waiting."""
+        handoff = self.take()
+        if handoff:
+            _end(handoff[0])
+            self._paused = False
 
     # --- livekit engine: stream fixed frames through the ONNX model ---------
     def _loop_livekit(self):
@@ -185,6 +231,7 @@ class WakeListener:
         dbg = bool(os.environ.get("ATTICUS_DEBUG"))
         peak, hb_t = 0.0, time.monotonic()
         empty_reads = 0
+        recent = collections.deque(maxlen=int(PREROLL / 0.08))
         self._proc = self._spawn()
         while self._running:
             # Take a local reference: pause() may set self._proc = None from
@@ -197,6 +244,7 @@ class WakeListener:
                 if not self._paused and self._proc is None:
                     self._proc = self._spawn()
                 empty_reads = 0
+                recent.clear()
                 continue
             try:
                 data = proc.stdout.read(chunk)
@@ -213,6 +261,7 @@ class WakeListener:
                 time.sleep(min(0.5, 0.02 * empty_reads))
                 continue
             empty_reads = 0
+            recent.append(data)
             samples = np.frombuffer(data, dtype=np.int16)
             try:
                 scores = self._lk.predict(samples)
@@ -227,7 +276,7 @@ class WakeListener:
                     print(f"[wake] alive, peak_score_3s={peak:.3f} paused={self._paused}", flush=True)
                     peak, hb_t = 0.0, time.monotonic()
             if top >= self.threshold:
-                self._fire_if_ready()
+                self._fire_if_ready(b"".join(recent) if proc is self._proc else None)
 
     # --- whisper fallback engine: VAD-segment, transcribe, fuzzy match ------
     def _loop_whisper(self):
@@ -328,6 +377,9 @@ class WakeListener:
 
     def pause(self):
         self._paused = True
+        handoff = self.take()
+        if handoff:
+            _end(handoff[0])
         # Swap to a local reference before acting on it: the loop thread reads
         # self._proc without a lock, so clearing it first (then terminating
         # the local reference) avoids a window where self._proc is non-None

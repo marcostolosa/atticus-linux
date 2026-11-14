@@ -138,6 +138,9 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `asrModel` | `"small"` | Whisper model. `"base"` answers about 2 s sooner on a laptop CPU but mishears more. |
 | `sttRemote` | `"auto"` | Use the Home Assistant server's Whisper service for speech recognition when `haUrl`/`haToken` are set (usually a larger model on a stronger machine: faster and far better with whispers). Falls back to the local model. `"off"` keeps it local. |
 | `sttEntity` | auto | Which `stt.*` entity to use on that server. |
+| `asrVocabulary` | `[]` | Names the local model should expect, for example `["Dom", "Faber"]`. Your Home Assistant device names are added by themselves. |
+| `asrBias` | `true` | Tell the local model those names. `false` turns it off. |
+| `endSilence` | `0.9` | Seconds without a voice that end a request after the wake word. |
 | `instant` | `true` | Run everyday commands locally without the AI. |
 | `followUp` | `"always"` | After an answer, open the microphone again so a reply needs no wake word. `"question"`: only when Atticus ends on a question. `false`: never. |
 | `followUpSeconds` | `3` | How long that follow-up waits for a voice before closing in silence. |

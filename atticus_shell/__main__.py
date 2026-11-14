@@ -136,6 +136,7 @@ def main():
             self._heard_word = False     # this recording starts with the wake word itself
             self._about_device = False   # the last thing done or asked was about a smart-home device
             self._retry = False          # this recording is the second try after "não entendi"
+            self._dictating = False      # what is being said is to be typed, not answered
             self._asked = ""             # the request the brain is working on
             self.recorder = Recorder()
             self.transcriber = Transcriber()
@@ -289,6 +290,16 @@ def main():
                 self._end_listen()
             elif cmd == "toggle":
                 (self._end_listen if self.listening else self._begin_listen)()
+            elif cmd == "dictate":         # one key: starts, and pressed again finishes
+                (self._end_listen if self._dictating else self._begin_dictate)()
+            elif cmd == "dictate-press":   # held key: down starts ...
+                self._begin_dictate()
+            elif cmd == "dictate-release":  # ... up finishes
+                if self._dictating:
+                    self._end_listen()
+            elif cmd == "dictate-text" and arg:   # text from elsewhere: tidy it and type it
+                self._gen += 1
+                threading.Thread(target=self._dictate_finish, args=(None, self._gen, arg), daemon=True).start()
             elif cmd == "cancel":
                 self._cancel()
             elif cmd == "ask" and arg:
@@ -566,6 +577,77 @@ def main():
             said = self._speaking_text if self._speaking else ""
             recent.add(asked, said or "(the user interrupted before there was an answer)")
 
+        # --- dictation: say it, and it is typed where the cursor is ----------
+        def _begin_dictate(self):
+            if self._dictating:
+                return
+            self._disarm_barge()
+            self._stop_recording()
+            self.speaker.stop()
+            self._gen += 1
+            if self.wake:
+                self.wake.pause()
+            self._cancel_autohide()
+            self.overlay.present()
+            self.overlay.call("listen", "dict")    # the small pill, not the whole box
+            self.earcons.play("start")
+            if not self.recorder.start():
+                self.overlay.call("dictated", {"text": "No microphone available."})
+                self._resume_wake()
+                self._schedule_autohide()
+                return
+            self._log("dictation: listening")
+            self.listening = True
+            self._dictating = True
+            self._answering = self._followup = self._retry = self._heard_word = False
+            self._wake_session = True        # a long pause finishes it too
+            self._speech_seen = False
+            self._silence_since = 0.0
+            self._floor = None
+            self._vad_ticks, self._vad_busy = 0, False
+            self._listen_started = time.monotonic()
+            self._level_source = GLib.timeout_add(60, self._tick_level)
+
+        def _dictate_finish(self, audio, gen, text=None):
+            """Off the main thread: the words, tidied by the brain (punctuation,
+            names, false starts), typed into whatever window has the keyboard."""
+            from . import hands
+            from .bridge import ATTICUS_PY, _brain_env
+            try:
+                heard = text if text is not None else (self.transcriber.transcribe(audio) if audio is not None else "")
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                heard = ""
+            heard = (heard or "").strip()
+            tidy = ""
+            if heard:
+                try:
+                    r = subprocess.run([sys.executable, str(ATTICUS_PY), "--dictate-cleanup"], input=heard, env=_brain_env(),
+                                       capture_output=True, text=True, timeout=float(cfg.get("dictateCleanupSeconds", 20)))
+                    tidy = r.stdout.strip() if r.returncode == 0 else ""
+                except (OSError, subprocess.TimeoutExpired):
+                    tidy = ""
+            final = tidy or heard                   # the tidy-up failing never loses the words
+            ok, err = hands.insert_text(final) if final else (False, "")
+            GLib.idle_add(self._dictate_done, gen, heard, final, ok, err)
+
+        def _dictate_done(self, gen, heard, final, ok, err):
+            if gen != self._gen:
+                return False
+            self._log("dictation", heard=heard, typed=final if ok else "", error=err)
+            en = str(self.transcriber.last_language or cfg.get("asrLanguage", "")).lower().startswith("en")
+            if ok:
+                self.overlay.call("dictated", {})
+            elif not final:
+                self.overlay.call("dictated", {"text": "Heard nothing." if en else "Não ouvi nada."})
+            else:   # could not type: show the words so they can be copied
+                self.overlay.call("dictated", {"text": final[:200], "words": final})
+            self.earcons.play("end" if ok else "cancel")
+            self._resume_wake()
+            self._schedule_autohide(2 if ok else 8)
+            return False
+
         def _tick_level(self):
             if not self.listening:
                 return False
@@ -592,7 +674,7 @@ def main():
                     else:
                         self._end_listen()
                     return False
-                if now - self._listen_started > 12:   # hard cap
+                if now - self._listen_started > (180 if self._dictating else 12):   # hard cap
                     self._end_listen()
                     return False
             return True
@@ -628,7 +710,8 @@ def main():
                 self._speech_seen = True
             # Over Atticus's own voice people say short things ("para"), and
             # the speech is being held meanwhile: a shorter pause ends it.
-            limit = 0.6 if self._barge_pending else float(cfg.get("endSilence", 0.9) or 0.9)
+            limit = (0.6 if self._barge_pending else float(cfg.get("dictateSilence", 2.5)) if self._dictating
+                     else float(cfg.get("endSilence", 0.9) or 0.9))   # dictating, people stop to think
             if self._speech_seen and ago >= limit:
                 if os.environ.get("ATTICUS_DEBUG"):
                     print(f"[listen] endpoint: no voice for {ago:.2f} s", flush=True)
@@ -693,6 +776,11 @@ def main():
             guard, self._followup = self._followup, False
             word, self._heard_word = self._heard_word and self.wake and self.wake.word, False
             lead = self.recorder.lead
+            if self._dictating:          # typed where the cursor is, not answered
+                self._dictating = False
+                self.overlay.call("finishing", "")
+                threading.Thread(target=self._dictate_finish, args=(audio, gen), daemon=True).start()
+                return
             if self._barge_pending:      # spoke over the answer: decide once it is transcribed
                 threading.Thread(target=self._barge_transcribe, args=(audio, gen), daemon=True).start()
                 return
@@ -950,6 +1038,7 @@ def main():
         def _cancel(self):
             self._gen += 1   # invalidate any transcription still in flight
             self._barge_pending = None
+            self._dictating = False
             self._disarm_barge()
             self._stop_recording()
             self.speaker.stop()

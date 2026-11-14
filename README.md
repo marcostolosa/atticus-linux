@@ -211,6 +211,20 @@ voice by [Piper](https://github.com/OHF-Voice/piper1-gpl).
 
 MIT. See [LICENSE](LICENSE).
 
+## Dictation
+
+Say it and it is typed where the cursor is, in any app. Bind a key to
+`atticus-ctl dictate` (press to start, press again to finish; a pause of a
+couple of seconds finishes it too), or hold-to-dictate with
+`atticus-ctl dictate-press` on key down and `atticus-ctl dictate-release` on
+key up:
+
+    bind  = CTRL ALT, D, exec, atticus-ctl dictate
+
+The words are tidied first (punctuation, names, false starts). One line is
+typed; several lines are pasted, because a typed line break would press Enter
+and send a half-written chat message. The clipboard is put back afterwards.
+
 ## Music
 
 "Toca Tim Maia" plays it. With the Spotify app installed the song, album,

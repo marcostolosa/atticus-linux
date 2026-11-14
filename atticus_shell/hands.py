@@ -204,6 +204,48 @@ def type_text(text: str) -> tuple[bool, str]:
     return _ydotool("type", "--", text)   # best effort if wtype isn't installed
 
 
+TERMINALS = ("kitty", "foot", "footclient", "alacritty", "ghostty", "wezterm", "konsole", "gnome-terminal",
+             "xterm", "st", "tilix", "terminator", "com.mitchellh.ghostty", "org.wezfurlong.wezterm")
+
+
+def _front_class() -> str:
+    try:
+        raw = subprocess.run(["hyprctl", "-j", "activewindow"], capture_output=True, text=True, timeout=3).stdout
+        return str((json.loads(raw or "{}") or {}).get("class", "")).lower()
+    except Exception:
+        return ""
+
+
+def insert_text(text: str) -> tuple[bool, str]:
+    """Put text where the cursor is. One line is typed. Several lines are
+    pasted: typing a line break is pressing Enter, and in a chat window that
+    sends what was written so far. The clipboard is put back afterwards."""
+    if "\n" not in text or not (shutil.which("wl-copy") and shutil.which("wtype")):
+        return type_text(text.replace("\n", " ") if "\n" in text else text)
+    try:
+        before = subprocess.run(["wl-paste", "--no-newline"], capture_output=True, timeout=2)
+        kept = before.stdout if before.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        kept = None
+    try:
+        subprocess.run(["wl-copy", "--"], input=text.encode(), timeout=3, check=True)
+        time.sleep(0.08)
+        keys = ["-M", "ctrl", "-M", "shift", "v"] if _front_class() in TERMINALS else ["-M", "ctrl", "v"]   # terminals keep ctrl+v for themselves
+        r = subprocess.run(["wtype", *keys], capture_output=True, text=True, timeout=TIMEOUT)
+        ok, err = r.returncode == 0, (r.stderr or "").strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        ok, err = False, str(e)
+    time.sleep(0.25)                       # let the window read it before it is replaced
+    try:
+        if kept is not None:
+            subprocess.run(["wl-copy", "--"], input=kept, timeout=3)
+        else:
+            subprocess.run(["wl-copy", "--clear"], timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ok, err
+
+
 # --- window placement -----------------------------------------------------
 def _hl(expr: str) -> tuple[bool, str]:
     try:

@@ -129,3 +129,29 @@ class ScreenActions(unittest.TestCase):
     def test_the_step_line_names_it_too(self):
         self.assertEqual(self.brain.hands_label('click 812 430 "botão Entrar"'), "Clicking “botão Entrar”")
 
+
+class Windows(unittest.TestCase):
+    """Apps are found by the name people use, whatever class their windows carry."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.brain = load()
+        cls.brain.windows = lambda: [{"class": "brave-browser", "address": "0x1", "initialClass": "brave-browser"},
+                                     {"class": "kitty", "address": "0x2", "initialClass": "kitty"}]
+        cls.brain.app_classes = lambda app: {cls.brain.app_key(app)} | ({"bravebrowser"} if cls.brain.app_key(app) == "brave" else set())
+
+    def test_an_app_is_found_by_its_everyday_name(self):
+        self.assertEqual([w["address"] for w in self.brain.app_windows("Brave")], ["0x1"])
+        self.assertEqual(self.brain.proc_of("Kitty"), "kitty")
+        self.assertTrue(self.brain.app_running("kitty"))
+
+    def test_an_app_that_is_not_open(self):
+        self.assertFalse(self.brain.app_running("Spotify"))
+        self.assertTrue(self.brain.quit_app("Spotify"))
+        self.assertEqual(self.brain.app_windows(""), [])
+
+    def test_commands_that_bring_a_window_forward(self):
+        self.assertTrue(self.brain.focus_command("open -a Brave"))
+        self.assertFalse(self.brain.focus_command("open -g https://example.com"))
+        self.assertFalse(self.brain.focus_command("ls -la"))
+

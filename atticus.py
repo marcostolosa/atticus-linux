@@ -726,16 +726,16 @@ def shell_tokens(cmd):
 
 
 def focus_command(cmd):
+    """Would this shell command bring a window forward? Opening anything does here; so does asking the compositor to focus."""
     try: tokens = shell_tokens(cmd)
     except ValueError: return True
     for i, token in enumerate(tokens):
-        if os.path.basename(token) == 'open':
+        base = os.path.basename(token)
+        if base in ('open', 'xdg-open', 'gtk-launch'):
             boundary = max((j for j in range(i) if tokens[j] in (';', '&&', '||', '|')), default=-1)
             head = tokens[boundary + 1:i]
             if (not head or os.path.basename(head[0]) in ('env', 'command', 'nohup', 'exec', 'xargs')) and '-g' not in tokens[i + 1:next((j for j in range(i + 1, len(tokens)) if tokens[j] in (';', '&&', '||', '|')), len(tokens))]: return True
-        if os.path.basename(token) == 'osascript':
-            script = ' '.join(tokens[i + 1:])
-            if re.search(r'perform action\s+"AXRaise"', script, re.I) or re.search(r'\bactivate\b|set\s+frontmost\b.*\btrue\b', re.sub(r'"(?:[^"\\]|\\.)*"', '""', script), re.I): return True
+        if base == 'hyprctl' and re.search(r'\bfocus\b|focuswindow|\bworkspace\b', ' '.join(tokens[i + 1:])): return True
     return False
 
 
@@ -1221,55 +1221,27 @@ def allow_focus(task):
 
 
 def restore_focus(app, task, cmds):
-    if wants_focus(task) or re.search(r'\b(close|quit|exit)\b', task, re.I) or pref('workIn', 'back') == 'front':
+    if wants_focus(task) or re.search(r'\b(close|quit|exit|fecha|feche|fechar|sai|sair)\b', task, re.I) or pref('workIn', 'back') == 'front':
         return
-    now = osa('tell application "System Events" to get name of first process whose frontmost is true')
+    now = front()[0]
     try:   # written during this ask only; an earlier task's window is not one this task touched
         with open(WORKED) as f: worked = json.load(f).get('app', '') if os.path.getmtime(WORKED) >= TURN.get('_started', 0) else ''
     except (OSError, ValueError, AttributeError): worked = ''
-    # only an app this task touched (named in a command: tell, open -a, process; or the window it worked in), never one the user switched to
+    # only an app this task touched (named in a command, or the window it worked in), never one the user switched to
     if not now or now == app or not (now.lower() in ' '.join(cmds).lower() or now == worked): return
-    # Address a running process, never `activate` an app: that can relaunch it or reopen its closed window.
-    osa('on run argv\ntell application "System Events"\n'
-        'if exists process (item 1 of argv) then\nset frontmost of process (item 1 of argv) to true\n'
-        'end if\nend tell\nend run', app)
+    back = next((c for c in windows() if c['class'] == app), None)   # a window that is there, never a relaunch
+    if back: focus_window(back)
 
 
 def request_screen():
+    """The display the user is on: the one holding the window in front."""
     if os.environ.get('ATTICUS_SCREEN'): return os.environ['ATTICUS_SCREEN']
-    app = os.environ.get('ATTICUS_FRONT') or front()[0]
     try:
-        x, y = map(int, osa(f'tell application "System Events" to tell process "{app}" to get position of window 1').split(', '))
-        return next((n for n, sx, sy, w, h, _ in screens() if sx <= x + 50 < sx + w and sy <= y + 50 < sy + h), 'current')
-    except ValueError: return 'current'
+        mons = json.loads(subprocess.run(['hyprctl', '-j', 'monitors'], capture_output=True, text=True, timeout=3).stdout or '[]')
+        return next((m['name'] for m in mons if m.get('focused') and m.get('name')), 'current')
+    except (OSError, ValueError, subprocess.TimeoutExpired): return 'current'
 
 
-WINDOWS_JS = '''function run(argv) {
-  try {
-    if (argv[1] == "windows") return JSON.stringify(Application("System Events").processes.byName(argv[0]).windows().map(w => [w.name(), w.subrole()]));
-    var app = Application(argv[0]);   // its own list also sees other Spaces; never launch it to ask
-    return JSON.stringify(app.running() ? app.windows.name().map(n => [n, "AXStandardWindow"]) : []);
-  } catch (e) { return "[]"; }
-}'''
-
-
-def placement_window(proc, title):
-    """(exact name, None) of the one window a move means, else (None, why): read only, before anything moves.
-    The exact title wins (spaces, hyphens and underscores alike, extension shown or hidden), else the one window containing it."""
-    ext = re.compile(r'\.[a-z0-9]{2,4}$', re.I)
-    key = lambda s: ' '.join(re.split(r'[\s_-]+', s.casefold())).strip()
-    want, stem = key(title), key(ext.sub('', title))
-    tiers = (lambda n: key(n) == want, lambda n: key(ext.sub('', n)) == stem and not (ext.search(n) and ext.search(title)), lambda n: stem in key(n))
-    for tries in range(4):   # a window just opened (--show right before) can take a moment to appear
-        for source in ('windows', 'app'):
-            try: rows = [(n or '', s) for n, s in json.loads(subprocess.run(['osascript', '-l', 'JavaScript', '-e', WINDOWS_JS, proc, source],
-                                                                             capture_output=True, text=True, timeout=3).stdout or '[]')]
-            except (OSError, ValueError, TypeError, subprocess.TimeoutExpired): rows = []
-            found = next((f for t in tiers if (f := [n for n, _ in rows if t(n)])), []) if title else [n for n, s in rows if s == 'AXStandardWindow'][:1]   # Chrome's window 1 can be a hidden popup bar
-            if len(found) == 1 and (not found[0] or [n for n, _ in rows].count(found[0]) == 1): return found[0], None
-            if found: return None, f'NOT DONE: more than one {proc} window matches "{title or found[0]}"; nothing moved. Ask which one.'
-        if tries < 3: time.sleep(0.4)
-    return None, f'no window found for "{proc}" {title}'
 
 
 def place_linux(proc, where='full', screen='current', title=''):
@@ -1308,111 +1280,8 @@ def place_linux(proc, where='full', screen='current', title=''):
 
 
 def place(proc, where='full', screen='current', title=''):
-    """Place a window; full maximizes, fullscreen enters a native macOS Space."""
-    if sys.platform != 'darwin':
-        return place_linux(proc, where, screen, title)
-    native = where == 'fullscreen'
-    if native: where = 'full'
-    if where not in ('left', 'right', 'full', 'center'):
-        return 'where must be left, right, full, fullscreen or center'
-    if screen == 'current': screen = request_screen()
-    name, problem = placement_window(proc, title)
-    if problem: return problem
-    app_q = osa_quote(proc)
-    # every read and write names that one window: a raise, a reorder or a copy opening mid-move can't swap it
-    win = aw = f'(first window whose name is "{osa_quote(name)}")'
-    if not name: win, aw = '(first window whose subrole is "AXStandardWindow")', 'window 1'   # shortcut: an unnamed window has no name to pin; pin its AX index if one ever moves the wrong window
-    tell = f'tell application "System Events" to tell process "{app_q}" to '
-    free_focus()   # moving and full screen bring the app forward; the guard must not put it back mid-move
-    pick = {'laptop': lambda s: s[5], 'monitor': lambda s: not s[5]}.get(
-        screen, (lambda s: s[0] == screen) if screen != 'current' else (lambda s: s[1] <= px + ww // 2 < s[1] + s[3] and s[2] <= py + wh // 2 < s[2] + s[4]))
-    for tries in range(4):   # a window just opened (--show right before) can take a moment to appear
-        # full screen (or split view) windows can't move; checked each try, since it only shows once the app is forward
-        state = osa(tell + f'tell {win} to return {{value of attribute "AXFullScreen", value of attribute "AXMinimized", position, size}}').split(', ')
-        if state[:1] == ['true']:
-            try:   # already full screen where it should be: leaving and re-entering is a slow animation for nothing
-                fx, fy = map(int, osa(tell + f'get position of {win}').split(', ')); fw, fh = map(int, osa(tell + f'get size of {win}').split(', '))
-                there = next((s for s in screens() if pick(s)), None) if where == 'full' and screen != 'current' else None
-                if there and there[1] <= fx + fw // 2 < there[1] + there[3]:   # already there, but its full screen Space may not be the one showing: show it
-                    free_focus(); osa(tell + f'perform action "AXRaise" of {win}'); subprocess.run(['open', '-a', proc], capture_output=True)
-                    return f'{proc} is already full screen on {there[0]}; brought it into view'
-            except ValueError: pass
-            osa(tell + f'set value of attribute "AXFullScreen" of {win} to false')
-            time.sleep(1.2)   # the exit animation
-            free_focus()
-        try:
-            if state[1:2] == ['true']:   # a minimized window moves but stays hidden
-                osa(tell + f'set value of attribute "AXMinimized" of {win} to false'); time.sleep(0.4)
-            if state[:1] == ['true']:   # bounds changed during the full-screen exit
-                state = osa(tell + f'tell {win} to return {{value of attribute "AXFullScreen", value of attribute "AXMinimized", position, size}}').split(', ')
-            px, py, ww, wh = map(int, state[2:])
-            app_mode = False
-            break
-        except ValueError:   # System Events can't see it (another Space): scriptable apps (Notes, Finder…) answer for their own windows, fast
-            if tries == 0 and osa(f'tell application "System Events" to exists process "{app_q}"') == 'true':
-                # its window is on another Space (often its own full screen one): arranging windows is visible work, so bring it here and look again
-                subprocess.run(['open', '-a', proc], capture_output=True); time.sleep(0.8)
-                continue
-            try:
-                l, t, r, b = map(int, osa(f'tell application "{app_q}" to get bounds of {aw}').split(', '))
-                px, py, ww, wh, app_mode = l, t, r - l, b - t, True
-                break
-            except ValueError:   # retry a launch without taking the user's focus
-                if tries < 3:
-                    time.sleep(0.4)
-    else:
-        return f'no window found for "{proc}" {title}'
-    scr = screens()
-    n, x, y, w, h, _ = next((s for s in scr if pick(s)), scr[0])
-    y, h = y + 25, h - 25   # menu bar
-    cw, ch = min(ww, w), min(wh, h)
-    bx, by, bw, bh = {'left': (x, y, w // 2, h), 'right': (x + w // 2, y, w - w // 2, h), 'full': (x, y, w, h),
-                      'center': (x + (w - cw) // 2, y + (h - ch) // 2, cw, ch)}[where]
-    # One step via the app when it is scriptable (Finder, Safari, Chrome…): after a window moves to the other
-    # display, System Events often can't see it any more, so a later resize would miss.
-    one = f'tell application "{app_q}" to set bounds of {aw} to {{{bx}, {by}, {bx + bw}, {by + bh}}}'
-    free_focus()
-    if native or (title and not app_mode) or subprocess.run(['osascript', '-e', one], capture_output=True).returncode:
-        osa(tell + f'set size of {win} to {{{bw}, {bh}}}')   # size first, then move, then size again
-        osa(tell + f'set position of {win} to {{{bx}, {by}}}')
-        osa(tell + f'set size of {win} to {{{bw}, {bh}}}')
-    def bounds(app_bounds=app_mode):
-        for attempt in range(6):   # Accessibility can disappear during a display/full-screen animation
-            try:
-                if app_bounds:
-                    return tuple(map(int, osa(f'tell application "{app_q}" to get bounds of {aw}').split(', ')))
-                l, t, r, b = map(int, osa(tell + f'tell {win} to return {{position, size}}').split(', '))
-                return l, t, l + r, t + b
-            except ValueError:
-                if attempt < 5: time.sleep(.2)
-        return None
-    landed = bounds()   # check, never assume: a window in its own full screen Space or a refused move stays put
-    if not landed and not native:
-        return f'Moved {proc}, but could not check where its window is. Look at the screen before saying it worked or moving it again.'
-    if landed and not (x <= (landed[0] + landed[2]) // 2 < x + w and y - 25 <= (landed[1] + landed[3]) // 2 < y + h):
-        return f'NOT DONE: {proc} window did not move to {n} (it may be full screen in its own Space). Say so; do not report success.'
-    if native:
-        def entered():
-            for _ in range(15):
-                if osa(tell + f'get value of attribute "AXFullScreen" of {win}') == 'true': return True
-                time.sleep(.1)
-        for _ in range(2):   # a request made during another Space animation is dropped: ask once more
-            osa(tell + f'set value of attribute "AXFullScreen" of {win} to true')
-            if entered(): break
-        else: return f'NOT DONE: {proc} did not enter full screen on {n}.'
-        landed = None
-        for _ in range(15):   # the animation moves the window: judge its display once it holds still, which also lets the next one start
-            before, landed = landed, bounds(False)
-            if not landed or landed == before: break
-            time.sleep(.1)
-        if not landed:
-            preview_app(proc, 'move', title and name)
-            return f'Moved {proc} into full screen, but could not check which display it used. Look at the screen before saying where it is or moving it again.'
-        l, t, r, b = landed
-        if not (x <= (l + r) // 2 < x + w and y - 25 <= (t + b) // 2 < y + h):
-            return f'NOT DONE: {proc} entered full screen on the wrong display.'
-    preview_app(proc, 'move', title and name)
-    return f'{proc} window -> {"fullscreen" if native else where} of {n}'
+    """Place a window; fullscreen is the same as full."""
+    return place_linux(proc, where, screen, title)
 
 
 def place_many(args):
@@ -1452,15 +1321,17 @@ def place_unchecked(output):   # not done, but a window may have moved: say so, 
 
 
 def keep_behind(mine, app, wait=1.5):
-    """Give focus back to the user's app if `app` jumped forward by itself (a launch, Spotify starting to play);
-    never undo a switch to some other app the user made."""
-    if not mine or not app or wants_focus() or pref('workIn', 'back') == 'front' or os.environ.get('ATTICUS_FOCUS_GUARD') == '1': return   # the native app watches late activations; don't hold every background open for 1.5 s
-    names = {app.lower(), proc_of(app).lower()}
-    for _ in range(int(wait * 10)):   # some apps come forward late (Spotify, Chrome on a monitor)
+    """Give focus back to the window the user was in if `app` came forward by itself (a launch always does here);
+    never undo a switch to some other app the user made. mine: that window's class."""
+    if not mine or not app or wants_focus() or pref('workIn', 'back') == 'front': return
+    names = app_classes(app) | {app_key(proc_of(app))}
+    for _ in range(int(wait * 10)):   # a new window takes a moment to appear
         time.sleep(0.1)
-        now = osa('tell application "System Events" to get name of first process whose frontmost is true')
-        if now != mine and now.lower() in names:
-            osa('on run argv\ntell application "System Events" to set frontmost of process (item 1 of argv) to true\nend run', mine); return
+        now = front()[0]
+        if now != mine and app_key(now) in names:
+            back = next((c for c in windows() if c['class'] == mine), None)
+            if back: focus_window(back)
+            return
 
 
 def background_tab(url, app):
@@ -1512,75 +1383,37 @@ def remember_background_tab(app):
 
 
 def show(target, bg=False):
-    """Open a URL, file or app where the user can see it, then hand focus back to the app the user was using.
-    bg: a page Atticus works in by itself opens behind, so the user keeps working (the mini screen shows it)."""
-    t = os.path.expanduser(target)
+    """Open a URL, a file or an app. bg: something Atticus works in by itself opens and the window the user was in gets
+    the focus back, so they keep working."""
+    t = os.path.expanduser(str(target).strip())
+    if not t: return 'nothing to open: name an app, a file or an address'
+    is_url, is_file = bool(re.match(r'^[a-z][a-z0-9+.-]*:', t)), os.path.exists(t)
     if re.match(r'^https?://', t) and not agent_url_allowed(t): return agent_url_denial()
-    if os.environ.get('ATTICUS_AGENT') and re.match(r'^https?://', t) and not (wants_focus() or pref('workIn', 'back') == 'front' and wants_focus(None, True)):
-        return web('read', t)
-    # Reopening an active app can restore a different input after navigation inside it.
-    active = False
-    if not re.match(r'^[a-z]+:', t) and not os.path.exists(t):
-        try: info = subprocess.run(['lsappinfo', 'info', '-only', 'LSASN,pid', '-app', t], capture_output=True, text=True, timeout=.3).stdout or ''
-        except (OSError, subprocess.TimeoutExpired): info = ''
-        pid = re.search(r'\bpid = (\d+)\b', info) if '(in front)' in info else None
-        active = bool(pid) and osa(f'tell application "System Events" to tell (first process whose unix id is {pid[1]}) to get frontmost and (value of attribute "AXMinimized" of window 1 is false)', timeout=.3) == 'true'
-    if active and (bg or pref('openOn', 'here') == 'here'):
-        if bg: preview_app(t, 'open')
-        return f'opened {target} in front'
-    mine = '' if bg and os.environ.get('ATTICUS_FOCUS_GUARD') == '1' else osa('tell application "System Events" to get name of first process whose frontmost is true') if bg else front()[0]
-    ahead = bg and pref('workIn', 'back') == 'front'
-    if bg:
-        is_url = bool(re.match(r'^[a-z]+:', t))
-        browser = ''
-        if not ahead and re.match(r'^https?://', t):
-            browser = running_app(t)
-            if browser and background_tab(t, browser):
-                status = web('wait', text=t, app=browser)
-                remember_background_tab(browser)
-                return f'opened {target} in the background' + (f'\n{status}' if status != 'Page ready.' else '')
-        if subprocess.run(['open'] + ([] if ahead else ['-g']) + ([t] if is_url or os.path.exists(t) else ['-a', t])).returncode:
-            return f'could not open {target}'
-        target_window = preview_app(t, 'open')
-        launched = target_window.get('app') if isinstance(target_window, dict) else t if not is_url and not os.path.exists(t) else ''
-        if not ahead: keep_behind(mine, launched)
-        if re.match(r'^https?://', t):
-            browser = (target_window.get('app', '') if isinstance(target_window, dict) else browser) or running_app(t)
-            status = web('wait',text=t,app=browser,fresh=True) if browser else 'Page readiness unavailable. Read the page before acting.'
-            if browser: remember_background_tab(browser)
-            where = 'in front' if ahead else 'in the background'
-            if status != 'Page ready.': return f'opened {target} {where}\n{status}'
-            return f'opened {target} {where}'
-        return f'opened {target} ' + ('in front' if ahead else 'in the background')
-    if pref('openOn', 'here') == 'here':   # This screen = in front, like a double-click
-        free_focus(user=True)
-        r = subprocess.run(['open', t] if re.match(r'^[a-z]+://', t) or os.path.exists(t) else ['open', '-a', t])
-        return f'no app or file called "{target}"' if r.returncode else f'opened {target} in front'
-    if re.match(r'^[a-z]+://', t) or os.path.exists(t):
-        subprocess.run(['open', '-g', t])
-        js = ('ObjC.import("AppKit"); var t = %s; var u = /^[a-z]+:\\/\\//.test(t) ? $.NSURL.URLWithString(t) : $.NSURL.fileURLWithPath(t); '
-              '$.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL(u).path.js') % json.dumps(t)
-        app = os.path.basename(subprocess.run(['osascript', '-l', 'JavaScript', '-e', js], capture_output=True, text=True).stdout.strip())[:-4]
-    else:
-        if not active and subprocess.run(['open', '-g', '-a', t]).returncode:
-            return f'no app or file called "{target}"'
-        app = t
-    scr, other = screens(), None
-    if len(scr) > 1 and app and app != mine:
-        for _ in range(15):   # wait for its window, at most 1.5 s
-            if osa(f'tell application "System Events" to count windows of process "{osa_quote(proc_of(app))}"') not in ('', '0'):
-                break
-            time.sleep(0.1)
-        try:
-            x = int(osa(f'tell application "System Events" to tell process "{mine}" to get position of window 1').split(', ')[0])
-        except ValueError:
-            x = 0
-        other = next((s[0] for s in scr if not s[1] <= x + 50 < s[1] + s[3]), None)
-        if other and place_failed(place(app, 'center', other)):
-            other = None   # opened, but never claim a display the move did not check
-        if not wants_focus() and pref('workIn', 'back') != 'front':
-            osa(f'tell application "System Events" to set frontmost of process "{mine}" to true')
-    return f'opened {target} in {app or "its app"}' + (f' on {other}' if other else '')
+    behind = bg and pref('workIn', 'back') != 'front' and not wants_focus()
+    mine = front()[0]
+    if not is_url and not is_file:
+        there = app_windows(t)
+        if there:   # already open: show the window that is there, never start a second copy
+            if behind: return f'{target} is already open'
+            focus_window(there[0])
+            return f'opened {target} in front'
+    back, seen = next((c for c in windows() if c['class'] == mine), None), {c['address'] for c in windows()}
+    # Detached and not waited for: some apps stay attached to whatever started them for as long as they run.
+    try: p = subprocess.Popen(['open', t] if is_url or is_file else ['open', '-a', t], stdin=subprocess.DEVNULL,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError: return f'could not open {target}'
+    appeared = False
+    for _ in range(30):   # up to 3 s for its window; a launcher that fails says so at once
+        time.sleep(0.1)
+        if p.poll():
+            return f'could not open {target}' if is_url or is_file else f'no app or file called "{target}"'
+        if any(c['address'] not in seen for c in windows()):
+            appeared = True
+            break
+    if behind:
+        if appeared and back: focus_window(back)   # a new window takes the focus: hand it back
+        return f'opened {target} in the background'
+    return f'opened {target} in front' if appeared or is_url or is_file else f'started {target}; its window has not appeared yet'
 
 
 NUMS = dict(zip('zero one two three four five six seven eight nine ten'.split(), map(str, range(11))))
@@ -1864,28 +1697,72 @@ def app_heard(words):
     return ranked[0][1] if ranked and ranked[0][0] >= .75 and (len(ranked) < 2 or ranked[1][0] < ranked[0][0]) else None
 
 
+# --- windows and apps (Hyprland) ---------------------------------------------
+def hypr(expr):
+    """One compositor command, as Lua: hypr('hl.dsp.focus({ window = "address:0x…" })'). True when it was taken."""
+    try: r = subprocess.run(['hyprctl', 'eval', f'hl.dispatch({expr})'], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired): return False
+    return not r.returncode and not r.stdout.strip().startswith('error')
+
+
+def windows():
+    """The windows on screen, most recently used first."""
+    try: rows = json.loads(subprocess.run(['hyprctl', '-j', 'clients'], capture_output=True, text=True, timeout=3).stdout or '[]')
+    except (OSError, ValueError, subprocess.TimeoutExpired): return []
+    return sorted((c for c in rows if isinstance(c, dict) and c.get('mapped') and c.get('class') and c.get('address')),
+                  key=lambda c: c.get('focusHistoryID', 1 << 30))
+
+
+def app_key(name):
+    return re.sub(r'[^a-z0-9]+', '', str(name).casefold())
+
+
+def app_classes(app):
+    """The window classes an app may show up under: its own name plus what its desktop entry says
+    ("Brave" is the entry brave-browser, so its windows are brave-browser)."""
+    want, keys = app_key(app), set()
+    try:
+        from atticus_shell import assistant
+        for a in assistant.apps():
+            if want and want in a.get('names', ()): keys |= {app_key(a['id']), app_key(a['id'].split('.')[-1])} | set(a['names'])
+    except Exception: pass
+    return keys | {want}
+
+
+def app_windows(app):
+    """The open windows of an app, named as the user or the model would name it."""
+    want = app_key(app)
+    if not want: return []
+    names, rows = app_classes(app), windows()
+    exact = [c for c in rows if app_key(c['class']) in names or app_key(c.get('initialClass', '')) in names]
+    return exact or [c for c in rows if len(want) >= 3 and (want in app_key(c['class']) or app_key(c['class']) in want)]
+
+
+def focus_window(window):
+    return hypr('hl.dsp.focus({ window = "address:%s" })' % window['address'])
+
+
 def proc_of(app):
-    """App name -> its System Events process name (Visual Studio Code runs as "Code")."""
-    bid = osa(f'id of application "{osa_quote(app)}"')
-    return osa(f'tell application "System Events" to get name of first process whose bundle identifier is "{osa_quote(bid)}"') or app
+    """App name -> the class its windows carry (Visual Studio Code shows up as "code")."""
+    rows = app_windows(app)
+    return rows[0]['class'] if rows else app
 
 
 def app_id(app):
-    return osa(f'id of application "{osa_quote(app)}"')
+    return proc_of(app)
 
 
-def app_running(bid):
-    return osa(f'tell application "System Events" to exists (first process whose bundle identifier is "{osa_quote(bid)}")') == 'true'
+def app_running(app):
+    return bool(app_windows(app))
 
 
-def quit_app(bid):
-    """Quit and verify one running app by bundle id; a save dialog may keep it open."""
-    if not app_running(bid):
-        return True
-    osa(f'tell application id "{osa_quote(bid)}" to quit', timeout=2)
-    for _ in range(10):
-        if not app_running(bid):
-            return True
+def quit_app(app):
+    """Close every window of an app and check they went; a save dialog may keep one open."""
+    rows = app_windows(app)
+    if not rows: return True
+    for c in rows: hypr('hl.dsp.window.close({ window = "address:%s" })' % c['address'])
+    for _ in range(15):
+        if not app_windows(app): return True
         time.sleep(0.1)
     return False
 

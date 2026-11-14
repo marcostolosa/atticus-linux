@@ -37,6 +37,7 @@ from pathlib import Path
 HOME = os.path.expanduser('~')
 DIR = os.environ.get('ATTICUS_DIR') or os.path.join(HOME, '.config/atticus')   # ATTICUS_DIR: tests keep off the user's chat and rules
 ME = os.path.abspath(__file__)   # inside Atticus.app once built, so the AI's helper commands point here
+QUIT = shlex.quote(ME) + ' --quit'
 PLACE, LOOK, SEARCH, READ, SHOW, REMEMBER, FORGET, TYPE, PLAY, QUEUE, ABOUT, SHORTCUT, FRONT, WATCH, PICK, SET, WEB, HISTORY, HANDS, WINDOW, ROUTINE = (shlex.quote(ME) + f' --{c}' for c in ('place', 'look', 'search', 'read', 'show', 'remember', 'forget', 'type', 'play', 'queue', 'me add', 'shortcut', 'front', 'watch', 'pick', 'set', 'web', 'history', 'hands', 'window', 'routine'))
 DRAW = shlex.quote(ME) + " --draw"
 MEMORY, RECENT = os.path.join(DIR, 'memory.md'), os.path.join(DIR, 'recent.jsonl')
@@ -1856,7 +1857,7 @@ def learn(task, cmds, reply, asked=''):
         return
     # looking around (screen, menus, web, saving a rule) is how the AI found the way; the replay needs only the actions
     cmds = shortcut_commands(asked or task, cmds, (cached_hands() or {}).get('app', ''))
-    act = (SHOW, PLACE, PLAY, QUEUE, TYPE, HANDS, 'open ', 'osascript ')
+    act = (SHOW, PLACE, PLAY, QUEUE, QUIT, TYPE, HANDS, 'open ')
     # 'make new': a reminder or note holds this moment's words ("make the task list" must not re-add old items)
     if not cmds or DEICTIC.search(k) or FAILED.search(reply) or not all(c.startswith(act) and hands_replayable(c) and 'PID:' not in c and 'make new' not in c and not risky(c) for c in cmds):
         return
@@ -1927,13 +1928,10 @@ def swapped(cmds, old, new):
 
 
 def replay_quit(tokens):
-    """A learned plain AppleScript quit -> bundle id, so display and process names cannot lie."""
-    if len(tokens) != 3 or tokens[:2] != ['osascript', '-e']:
+    """A learned "close this app" -> the app to close, else None."""
+    if len(tokens) != 3 or tokens[:2] != [ME, '--quit']:
         return None
-    m = re.fullmatch(r'tell application( id)? "([^"]+)" to quit', tokens[2], re.I)
-    if not m:
-        return None
-    return m[2] if m[1] else app_id(app_named(m[2]) or m[2])
+    return app_named(tokens[2]) or tokens[2]
 
 
 def replay(k, swap=None):
@@ -2107,7 +2105,7 @@ def fast(text):
                 'I do not have a verified procedure for that yet. Complete the task successfully first so I can save it.')
     if t in ('no', 'yes', 'ok', 'okay', 'nevermind', 'never mind', 'cancel', 'nothing', 'thanks', 'thank you'):
         return None if os.environ.get('ATTICUS_LIVE') == '1' else 'Okay.'   # stray word after a turn: no AI call; mid-sentence it starts the next words ("No, when I say …")
-    m = re.fullmatch(r'(?:close|quit) (.+)', t)
+    m = re.fullmatch(r'(?:close|quit|fecha|feche|fechar|encerra|encerre|encerrar) (?:o |a |os |as |the )?(.+)', t)
     app = app_named(m[1]) if m and not DEICTIC.search(m[1]) else None
     if app:
         bid = app_id(app)
@@ -2115,7 +2113,7 @@ def fast(text):
             return None
         if not quit_app(bid):
             return f'{app} is still open.'
-        fast.cmds = [shlex.join(['osascript', '-e', f'tell application id "{bid}" to quit'])]
+        fast.cmds = [f'{QUIT} {shlex.quote(app)}']
         return f'Closed {app}.'
     sk, g = (skills() if pref('learn', True) else {}), gist(t)
     k, swap = (t, None) if t in sk else (None, None) if DEICTIC.search(t) or not g else like(g, sk)   # same words that matter, any order or filler, or another app
@@ -5495,7 +5493,7 @@ LINUX_TOOLS = f"""- Timers, alarms, reminders (they ring, notify and speak by th
 - Sound, music, screen: {shlex.quote(ME)} --volume [N|+N|-N|mute|unmute] | --media play|pause|toggle|next|previous|stop|status | --brightness [N|+N|-N] | --notify "<text>". Other players/devices: playerctl, wpctl, nmcli, bluetoothctl.
 - Lists (shopping, to-do, any name): {shlex.quote(ME)} --list | --list "<name>" | --list "<name>" add "<item>" ["<item>"…] | remove "<item>" | clear.
 - Smart home (Home Assistant; lights, plugs, climate, covers, locks, scenes): {shlex.quote(ME)} --home list [domain] | state "<name>" | on|off|toggle "<name>" | set "<name>" brightness|temperature|volume|position <n>. It says so when no server is configured; relay that.
-- Apps: open -a "<name>" launches an installed app; {shlex.quote(ME)} --apps lists their names.
+- Apps: open -a "<name>" launches an installed app; {shlex.quote(ME)} --quit "<name>" closes it; {shlex.quote(ME)} --apps lists their names.
 - Shell: the helpers above and plain desktop queries run normally. Every other command runs in a read-only sandbox with no network and no access to the desktop, keys or passwords: fine for reading files and computing, and it cannot change anything. A command that must really change files or the system: prefix it with `outside ` (e.g. outside mv "a" "b"); the user sees it on an Allow card, so use it only for what was asked. Web content: {SEARCH} / {READ} / WebFetch, never curl. Deleting, sudo, power-off and git push never run.
 """
 
@@ -7847,15 +7845,11 @@ def main():
         if os.environ.get('ATTICUS_ASK') and not os.environ.get('ATTICUS_AGENT'):
             private_json(os.path.join(os.environ['ATTICUS_ASK'], 'focus-requested'), True)
         free_focus(user=True)
-        osa(f'tell application "{osa_quote(app)}" to activate')
-        if words:   # any app: the window whose title has the words; browsers: also that tab (fails quietly elsewhere). `contains` ignores case.
-            osa(f'on run argv\ntell application "System Events" to tell (first process whose name is "{osa_quote(proc_of(app))}")\n'
-                'perform action "AXRaise" of (first window whose name contains item 1 of argv)\nend tell\nend run', words)
-            set_tab = 'set current tab of w to t' if app == 'Safari' else 'set active tab index of w to i'
-            name = 'name' if app == 'Safari' else 'title'
-            osa(f'on run argv\ntell application "{osa_quote(app)}"\nrepeat with w in windows\nset i to 0\nrepeat with t in tabs of w\nset i to i + 1\n'
-                f'if ({name} of t contains item 1 of argv) or (URL of t contains item 1 of argv) then\n{set_tab}\nset index of w to 1\nreturn\n'
-                'end if\nend repeat\nend repeat\nend tell\nend run', words)
+        rows = app_windows(app)
+        if not rows:
+            return print(f'{app} has no open window. Open it first: open -a "{app}".')
+        want = [w for w in words.casefold().split() if w]   # the window whose title has the words, else the one used last
+        focus_window(next((c for c in rows if want and all(w in str(c.get('title', '')).casefold() for w in want)), rows[0]))
         time.sleep(0.5)   # the window draws before the picture
         return print('\n'.join(f'{label}: {path}' for path, label in look(cleanup=False)) or 'no screenshot: ' + need('screen', 'To see your screen for this task.'))
     if args[:1] == ['--type']:
@@ -7932,6 +7926,12 @@ def main():
         except (OSError, RuntimeError) as e:
             reply = str(e)
         return print(reply or 'Found nothing by that name to play.')
+    if args[:1] == ['--quit']:   # close an app: every window of it, checked
+        name = ' '.join(args[1:]).strip()
+        app = app_named(name) or name
+        if not name: return print('Name the app to close.')
+        if not app_running(app): return print(f'{app} is not open.')
+        return print(f'Closed {app}.' if quit_app(app) else f'{app} is still open (it may be asking to save something).')
     if args[:1] == ['--queue']:
         return print(queue(' '.join(args[1:])))
     if args == ['--state']:   # the Settings window: usage, saved rules, Claude plan
@@ -8103,8 +8103,10 @@ def main():
     if done: task += INTERNAL_TASK_MARKERS[0] + ' ' + ' '.join(done) + INTERNAL_TASK_MARKERS[1] + ' ' + (remaining or '') + '\nDo only the remaining goal; check before repeating completed actions.'
     if reading_started: atexit.register(reading.join, .3)
     app = os.environ.get('ATTICUS_FRONT') or front()[0]   # before anything else takes focus, so "this window" still means the user's window
-    m = re.fullmatch(r'(.*), (-?\d+), (-?\d+)', osa(f'tell application "System Events" to tell process "{app}" to get {{name, position}} of front window'), re.S) if app else None
-    win, fx, fy = (m[1], int(m[2]) + 50, int(m[3]) + 50) if m else ('', None, None)
+    try: active = json.loads(subprocess.run(['hyprctl', '-j', 'activewindow'], capture_output=True, text=True, timeout=2).stdout or '{}')
+    except (OSError, ValueError, subprocess.TimeoutExpired): active = {}
+    at = active.get('at') if isinstance(active.get('at'), list) and len(active.get('at')) == 2 else None
+    win, fx, fy = (str(active.get('title') or ''), int(at[0]) + 50, int(at[1]) + 50) if at else ('', None, None)
     displays.join()
     scr = describe(displays.screens, fx, fy)
     if os.environ.get('ATTICUS_SCREEN'): scr += '; Request screen (default for unnamed moves and drawings): ' + os.environ['ATTICUS_SCREEN']

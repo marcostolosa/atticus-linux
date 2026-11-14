@@ -535,7 +535,7 @@ if sys.platform == 'darwin':
 else:
     _WEB_TOOL = ''   # in-page DOM control is not available on Linux; native click/type below covers pages too
     _HANDS_TOOL = (f'- Native actions, by pixel coordinate (no accessibility label to target by name here): {HANDS} click <x> <y> [double] [right] | '
-                   'type "<text>" | press "<combo>" [times] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right [amount] | '
+                   'type "<text>" | press "<combo>" [times] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right <x> <y> [amount] (the position scrolls, same as a real wheel) | '
                    f'drag <x1> <y1> <x2> <y2>. Read a fresh {LOOK} picture first and act on exactly the coordinates it shows; a stale picture is a '
                    'wrong click. Returns changed state; read documents with the window reader.\n')
     _PLACE_NOTE = 'full maximizes; fullscreen is the same as full (no separate Space on Linux).'
@@ -3203,7 +3203,7 @@ def hands_linux(*args):
     feature already uses. Modifier keys are ctrl/alt/super, not cmd/opt."""
     if not args or args[0] not in LINUX_HANDS_VERBS or any(a.startswith('--') for a in args[1:]):
         return ('Use --hands click <x> <y> [double] [right] | type "<text>" | '
-                'press "<combo>" [times] | scroll up|down|left|right [amount] | '
+                'press "<combo>" [times] | scroll up|down|left|right <x> <y> [amount] | '
                 'drag <x1> <y1> <x2> <y2>; no flags. Get x/y from a {LOOK} picture.'), False
     if not wait_commit():
         return 'The request was cancelled before the transcript was confirmed.', False

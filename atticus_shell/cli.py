@@ -219,7 +219,10 @@ def hands_main(argv: list[str]) -> int:
     if not argv:
         return 1
     verb, rest = argv[0], argv[1:]
-    if verb in ("click", "type", "press", "scroll", "drag") and not hands.available():
+    if verb == "type" and not hands.type_available():
+        print("neither wtype nor ydotool is set up for typing")
+        return 1
+    if verb in ("click", "press", "scroll", "drag") and not hands.available():
         print("ydotool is not set up (install ydotool, enable the ydotool "
               "user service, and make sure this user is in the input group)")
         return 1
@@ -241,10 +244,17 @@ def hands_main(argv: list[str]) -> int:
         times = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 1
         ok, msg = hands.press(rest[0], times)
     elif verb == "scroll":
-        if not rest:
+        # direction x y [amount]: x/y position the pointer first — a wheel
+        # event only affects whatever is under the cursor, so without this a
+        # scroll call could silently do nothing or hit the wrong thing.
+        if len(rest) < 3:
             return 1
-        amount = int(rest[1]) if len(rest) > 1 and rest[1].lstrip("-").isdigit() else 3
-        ok, msg = hands.scroll(rest[0], amount)
+        try:
+            x, y = int(float(rest[1])), int(float(rest[2]))
+        except ValueError:
+            return 1
+        amount = int(rest[3]) if len(rest) > 3 and rest[3].lstrip("-").isdigit() else 3
+        ok, msg = hands.scroll(rest[0], amount, x, y)
     elif verb == "drag":
         if len(rest) < 4:
             return 1
@@ -296,9 +306,8 @@ def main(argv: list[str]) -> int:
     if cmd == "--type":
         from . import hands
         text = sys.stdin.read()
-        if not hands.available():
-            print("ydotool is not set up (install ydotool, enable the ydotool "
-                  "user service, and make sure this user is in the input group)")
+        if not hands.type_available():
+            print("neither wtype nor ydotool is set up for typing")
             return 1
         ok, msg = hands.type_text(text)
         if not ok:

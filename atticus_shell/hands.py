@@ -48,15 +48,22 @@ def _ydotool(*args: str) -> tuple[bool, str]:
 
 
 def available() -> bool:
-    """True once a click/type is actually likely to work: the binary is
-    there and its daemon's socket is reachable (ydotool itself would print a
-    clear connection error otherwise, but checking first avoids a confusing
-    partial failure mid-sequence, e.g. after a key-down with no matching up)."""
+    """True once click/press/scroll/drag are actually likely to work: the
+    ydotool binary is there and its daemon's socket is reachable (ydotool
+    itself would print a clear connection error otherwise, but checking
+    first avoids a confusing partial failure mid-sequence, e.g. after a
+    key-down with no matching up). `type` is checked separately by
+    `type_available()`, since it goes through wtype instead whenever that is
+    installed, which needs no daemon at all."""
     if not shutil.which("ydotool"):
         return False
     sock = os.environ.get("YDOTOOL_SOCKET") or os.path.join(
         os.environ.get("XDG_RUNTIME_DIR", "/tmp"), ".ydotool_socket")
     return os.path.exists(sock) or os.path.exists("/tmp/.ydotool_socket")
+
+
+def type_available() -> bool:
+    return bool(shutil.which("wtype")) or available()
 
 
 # --- mouse --------------------------------------------------------------
@@ -102,10 +109,26 @@ def drag(x1: int, y1: int, x2: int, y2: int, steps: int = 8) -> tuple[bool, str]
     return (True, "") if ok else (False, err)
 
 
-def scroll(direction: str, amount: int = 3) -> tuple[bool, str]:
-    dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}.get(
-        direction, (0, 1))
-    return _ydotool("mousemove", "--wheel", "-x", str(dx * amount), "-y", str(dy * amount))
+_WHEEL_UNITS_PER_NOTCH = 15   # empirically tuned live: 50 raw units visibly scrolled ~40 terminal lines
+
+
+def scroll(direction: str, amount: int = 3, x: int | None = None, y: int | None = None) -> tuple[bool, str]:
+    """A wheel event only affects whatever is under the pointer, so without
+    x/y this scrolls wherever the mouse was last left — often nowhere useful.
+    Pass the coordinate to scroll over (read off the same {LOOK} picture).
+    `amount` is notches (like real clicks of a mouse wheel), not raw units —
+    confirmed live that a handful of raw units is too small to register as a
+    scroll at all in a real app, so this scales up to a size that does."""
+    if x is not None and y is not None:
+        ok, err = move(x, y)
+        if not ok:
+            return False, err
+    # REL_WHEEL convention: positive y is up, negative is down — confirmed
+    # live (the opposite mapping visibly scrolled the wrong way).
+    dx, dy = {"up": (0, 1), "down": (0, -1), "left": (-1, 0), "right": (1, 0)}.get(
+        direction, (0, -1))
+    units = amount * _WHEEL_UNITS_PER_NOTCH
+    return _ydotool("mousemove", "--wheel", "-x", str(dx * units), "-y", str(dy * units))
 
 
 # --- keyboard -----------------------------------------------------------
@@ -159,9 +182,26 @@ def press(combo: str, times: int = 1) -> tuple[bool, str]:
 
 
 def type_text(text: str) -> tuple[bool, str]:
+    """Types real Unicode text, respecting the session's actual keyboard
+    layout. ydotool's own `type` sends raw US-QWERTY key positions, so on
+    any other layout (confirmed live on this br-abnt2 one) punctuation comes
+    out wrong — every ';' typed as 'ç', for one. wtype goes through the
+    compositor's virtual-keyboard protocol with the real keymap instead, so
+    it is used here even though everything else in this module is ydotool."""
     if not text:
         return True, ""
-    return _ydotool("type", "--", text)
+    if shutil.which("wtype"):
+        try:
+            r = subprocess.run(["wtype", "--", text], capture_output=True,
+                               text=True, timeout=TIMEOUT)
+            if r.returncode == 0:
+                return True, ""
+            return False, (r.stderr or r.stdout or "wtype failed").strip()
+        except subprocess.TimeoutExpired:
+            return False, "wtype timed out"
+        except OSError as e:
+            return False, str(e)
+    return _ydotool("type", "--", text)   # best effort if wtype isn't installed
 
 
 # --- window placement -----------------------------------------------------

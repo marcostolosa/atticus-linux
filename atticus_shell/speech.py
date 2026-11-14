@@ -140,7 +140,7 @@ class Transcriber:
         self.load()
         segments, info = self._model.transcribe(
             audio, language=language or self.language, vad_filter=True,
-            beam_size=1, condition_on_previous_text=False)
+            beam_size=5, condition_on_previous_text=False)
         text = " ".join(seg.text.strip() for seg in segments).strip()
         self.last_language = getattr(info, "language", None)
         return text

@@ -32,7 +32,7 @@ class Prompt(unittest.TestCase):
 
     def test_describes_this_desktop(self):
         self.assertIn("Linux desktop", self.prompt)
-        for gone in ("Mac helper", "AppleScript first", "open -a Atticus", "--calendar --help"):
+        for gone in ("Mac helper", "AppleScript first", "open -a Atticus", "--calendar --help", "--contacts"):
             self.assertNotIn(gone, self.prompt)
 
     def test_offers_the_assistant_tools(self):

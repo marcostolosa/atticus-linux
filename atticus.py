@@ -5727,6 +5727,8 @@ def system_prompt(risky):
                   'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked. The request is a speech transcript, sometimes whispered or said over noise: expect misheard or missing words and wrong verb endings. When the intended request is clear from what this assistant can do and the devices it knows, act on it; when it is not, say what you heard and ask once. Transcripts lose question marks: a statement about the state of a device or of the computer ("o ar está ligado") is a question, so check and answer it. Never show a choice card to ask what the user meant when you can check for yourself or one reading is the likely one; keep choice cards for real alternatives, with short options. The user may answer a card in their own words instead of an option: then do what they said.'),
                  ("- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.\n",
                   '- This is not a Mac: no AppleScript, osascript, defaults, launchctl or System Settings. Use the tools listed here.\n'),
+                 (' People: --contacts "<name/relationship>" or the app address book; missing/ambiguous: choices, never guess.',
+                  ' People: there is no address book to read here; ask who is meant when it is not clear, never guess.'),
                  (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',
                   ' There is no calendar helper on this system: use --remind for things to be reminded of, and say so if a real calendar event was asked for.'),
                  (f'- Spotify: {PLAY} "<name>" plays; {QUEUE} "<track>" queues.\n', LINUX_TOOLS),
@@ -6619,7 +6621,7 @@ def window_text(app='', offset=0, ocr=False):
     if STOPPING: return ''
     def read_ocr():
         try:
-            r = subprocess.run([APP, '--text', app, ''], capture_output=True, text=True, timeout=5)
+            r = subprocess.run([APP, '--text', app, ''], capture_output=True, text=True, timeout=25)
             if r.returncode == 0 and r.stdout.strip():
                 return 'OCR (visible window text only):\n' + r.stdout.strip()
         except (OSError, subprocess.TimeoutExpired): pass
@@ -8080,7 +8082,7 @@ def main():
                 print('not_done: ' + GONE); sys.exit(1)
             pin = {'env': {**env, 'ATTICUS_HANDS_STATE': hands_state()}}
         r = subprocess.run([APP, '--type'], input=' '.join(args[1:]), capture_output=True, text=True, **pin)
-        print(r.stdout.strip() or 'Could not type. Rebuild Atticus and allow Accessibility.')
+        print(r.stdout.strip() or ('Could not type: neither wtype nor ydotool is set up (see README).' if sys.platform != 'darwin' else 'Could not type. Rebuild Atticus and allow Accessibility.'))
         if r.returncode:
             sys.exit(r.returncode)
         return

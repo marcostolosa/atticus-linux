@@ -133,6 +133,7 @@ class WakeListener:
         self._paused = False
         self._last_fire = 0.0
         self._handoff = None   # (recorder process, its last seconds) once the word is heard
+        self._device = None    # None: the default microphone
 
     @property
     def engine(self) -> str:
@@ -192,7 +193,7 @@ class WakeListener:
         return True
 
     def _spawn(self):
-        cmd = _record_cmd()
+        cmd = _record_cmd(self._device)
         try:
             return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) if cmd else None
         except OSError:
@@ -391,7 +392,18 @@ class WakeListener:
             except Exception:
                 pass
 
-    def resume(self):
+    def resume(self, device: Optional[str] = None):
+        """Wait for the word again. device: hear it there instead of on the
+        default microphone. While Atticus speaks that is the echo-free one,
+        so the word said over its voice still gets through."""
+        if device != self._device:
+            self._device = device
+            proc, self._proc = self._proc, None   # the loop opens the new one
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
         if self._lk is not None:
             try:
                 self._lk.reset()

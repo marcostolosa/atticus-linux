@@ -431,21 +431,24 @@ def save_pref(key, value):
     private_json(PREFS, {**(values if isinstance(values, dict) else {}), key: value})
 
 
+DEFAULT_MODEL = 'sonnet'   # what answers when nothing was chosen; the window's model menu changes it (settings: model)
+
+
 def routing_mode():
     mode = pref('routing', '')
     if mode in ('cheapest', 'balanced', 'capable'): return mode
-    if pref('model', 'haiku') != 'haiku': return 'capable'
+    if pref('model', DEFAULT_MODEL) != 'haiku': return 'capable'
     return 'balanced' if pref('escalate', True) and pref('escalateAuto', True) else 'cheapest'
 
 
 def work_model():
-    model = pref('model', 'haiku')
+    model = pref('model', DEFAULT_MODEL)
     if model == 'haiku': model = pref('agentModel', 'sonnet')
     return model if model != 'haiku' else 'sonnet'
 
 
 def main_model():
-    if server(): return pref('model', 'haiku')
+    if server(): return pref('model', DEFAULT_MODEL)
     return work_model() if routing_mode() == 'capable' else 'haiku'
 
 
@@ -531,9 +534,10 @@ if sys.platform == 'darwin':
     _PLACE_NOTE = 'full maximizes; fullscreen enters a Space.'
 else:
     _WEB_TOOL = ''   # in-page DOM control is not available on Linux; native click/type below covers pages too
-    _HANDS_TOOL = (f'- Native actions, by pixel coordinate (no accessibility label to target by name here): {HANDS} click <x> <y> [double] [right] | '
-                   'type "<text>" | press "<combo>" [times] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right <x> <y> [amount] (the position scrolls, same as a real wheel) | '
-                   f'drag <x1> <y1> <x2> <y2>. Read a fresh {LOOK} picture first and act on exactly the coordinates it shows; a stale picture is a '
+    _HANDS_TOOL = (f'- Native actions, by pixel coordinate (no accessibility label to target by name here): {HANDS} click <x> <y> "<what is there>" [double] [right] | '
+                   'type "<text>" | press "<combo>" [times] ["<what it does>"] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right <x> <y> [amount] (the position scrolls, same as a real wheel) | '
+                   f'drag <x1> <y1> <x2> <y2> "<what is moved where>". The quoted words are shown and read aloud to the user when they are asked to allow it, so name the thing in their language as they would '
+                   f'("botão Entrar", "campo de e-mail do Instagram"), never coordinates. Read a fresh {LOOK} picture first and act on exactly the coordinates it shows; a stale picture is a '
                    'wrong click. Returns changed state; read documents with the window reader.\n')
     _PLACE_NOTE = 'full maximizes; fullscreen is the same as full (no separate Space on Linux).'
 
@@ -3129,6 +3133,9 @@ def hands_label(s):
         return f'{verb} {a[1]}'
     if a[0] == 'press':
         return f'{verb} ' + ''.join(KEYS.get(k.lower(), k.upper() if len(k) == 1 else k.capitalize()) for k in a[1].split('+'))
+    if sys.platform != 'darwin' and a[0] in ('click', 'drag'):   # here the target is a place plus its name: show the name
+        named = ' '.join(w for w in a[3 if a[0] == 'click' else 5:] if w.lower() not in ('double', 'right'))
+        return f'{verb} “{named[:60]}”' if named else verb
     return f'{verb} “{hands_name(a[1])[:60]}”'
 HANDS_RISK = (r'\b(buy|purchase|pay|payment|order|bid|checkout|delete|remove|erase|send|submit|transfer|withdraw|donate|'
               r'subscribe|authorize|grant access|allow access|confirm|log.?out|sign.?out|unsubscribe|book|reserve|publish|post|'
@@ -3251,35 +3258,69 @@ def hands_map(app='', target=None):
 LINUX_HANDS_VERBS = {'click', 'type', 'press', 'scroll', 'drag'}
 
 
+HANDS_WORDS = {   # the Allow card, in the language the user speaks
+    'pt': {'click': 'Clicar em “{}”?', 'double': 'Dar dois cliques em “{}”?', 'right': 'Clicar com o botão direito em “{}”?',
+           'drag': 'Arrastar: {}?', 'press': 'Apertar {}?', 'press for': 'Apertar {} para {}?',
+           'mouse': 'com o mouse', 'keys': 'no teclado'},
+    'en': {'click': 'Click “{}”?', 'double': 'Double-click “{}”?', 'right': 'Right-click “{}”?',
+           'drag': 'Drag: {}?', 'press': 'Press {}?', 'press for': 'Press {} to {}?',
+           'mouse': 'with the mouse', 'keys': 'on the keyboard'},
+}
+
+
+def hands_plan(args):
+    """One screen action as (what to run, the question to ask, the line under it).
+    The question names the thing on screen in the user's words; where it sits
+    in pixels means nothing to them and is never shown or read aloud.
+    No name given for a click or a drag: (None, how to call it, '')."""
+    verb, rest = args[0], list(args[1:])
+    words = HANDS_WORDS['pt' if str(pref('asrLanguage', os.environ.get('LANG', ''))).lower().startswith('pt') else 'en']
+    if verb == 'click':
+        opts = [a.lower() for a in rest[2:] if a.lower() in ('double', 'right')]
+        what = ' '.join(a for a in rest[2:] if a.lower() not in ('double', 'right')).strip()
+        if not what or re.fullmatch(r'[\d\s:,.xy=]+', what, re.I):
+            return None, 'Name what is at that spot, in the user\'s language: --hands click <x> <y> "<the button, link or field>".', ''
+        return [verb, *rest[:2], *opts], words['right' if 'right' in opts else 'double' if 'double' in opts else 'click'].format(what[:80]), words['mouse']
+    if verb == 'drag':
+        what = ' '.join(rest[4:]).strip()
+        if not what or re.fullmatch(r'[\d\s:,.xy=]+', what, re.I):
+            return None, 'Say what is dragged where, in the user\'s language: --hands drag <x1> <y1> <x2> <y2> "<what, to where>".', ''
+        return [verb, *rest[:4]], words['drag'].format(what[:80]), words['mouse']
+    if verb == 'press':
+        times = rest[1:2] if rest[1:2] and rest[1].isdigit() else []
+        what = ' '.join(rest[1 + len(times):]).strip()
+        keys = ' + '.join(k.upper() if len(k) == 1 else k.capitalize() for k in (rest[0] if rest else '').split('+'))
+        return [verb, *rest[:1], *times], (words['press for'].format(keys, what[:80]) if what else words['press'].format(keys)), words['keys']
+    return list(args), '', ''
+
+
 def hands_linux(*args):
-    """Linux: click/type/press/scroll by pixel coordinate (ydotool + Hyprland,
-    via $ATTICUS_APP --hands), not by accessibility label — there is no
-    accessibility tree reliable enough across GTK/Qt/Electron/terminal apps
-    on this stack to target a control by name the way macOS's AX API does.
-    Coordinates come from a {LOOK} picture, the same pattern the Pointer
-    feature already uses. Modifier keys are ctrl/alt/super, not cmd/opt."""
+    """Click, type, press, scroll and drag at a place on the screen (ydotool +
+    Hyprland, via $ATTICUS_APP --hands). The place comes from a picture of
+    the screen; a click or a drag also says in words what is there, which is
+    what the user is shown and told. Modifier keys are ctrl/alt/super."""
     if not args or args[0] not in LINUX_HANDS_VERBS or any(a.startswith('--') for a in args[1:]):
-        return ('Use --hands click <x> <y> [double] [right] | type "<text>" | '
-                'press "<combo>" [times] | scroll up|down|left|right <x> <y> [amount] | '
-                'drag <x1> <y1> <x2> <y2>; no flags. Get x/y from a {LOOK} picture.'), False
+        return ('Use --hands click <x> <y> "<what is there>" [double] [right] | type "<text>" | '
+                'press "<combo>" [times] ["<what it does>"] | scroll up|down|left|right <x> <y> [amount] | '
+                'drag <x1> <y1> <x2> <y2> "<what, to where>"; no flags. Get x/y from a fresh picture of the screen.'), False
+    verb = args[0]
+    run, question, how = hands_plan(args)
+    if run is None:
+        return question, False
     if not wait_commit():
         return 'The request was cancelled before the transcript was confirmed.', False
-    verb = args[0]
-    # No accessibility label to show or classify as risky here, so every
-    # click/press/drag (never a plain scroll, or filling a field) gets the
-    # same Allow card a risky mac action would, unless the user's own words
-    # already asked for exactly this action this turn.
+    # Every click, key press and drag (never a plain scroll, or filling a
+    # field) gets the Allow card, unless the user's own words already asked
+    # for exactly this action this turn.
     if verb in ('click', 'press', 'drag') and pref('safe', True) and not task_allowed('hands ' + verb):
-        detail = ' '.join(args[1:])
         if not os.environ.get('ATTICUS_ASK'):
-            return f'Safe mode: {verb} "{detail}" needs the user’s Allow card.', False
-        question = f'{verb.capitalize()} "{detail[:120]}"?'
-        answer = ask_user({'q': question, 'cmd': f'{verb} {detail[:300]}', 'task': managed_agent()}, 60)
+            return f'Safe mode: {question} needs the user’s Allow card.', False
+        answer = ask_user({'q': question, 'cmd': how, 'task': managed_agent()}, 60)
         if answer == 'task' and managed_agent(): allow_for_task('hands ' + verb)
         elif answer != 'y':
             return 'The user said no. Do not try another way; say it was not done.', False
     try:
-        r = subprocess.run([APP, '--hands', *args], capture_output=True, text=True, timeout=15)
+        r = subprocess.run([APP, '--hands', *run], capture_output=True, text=True, timeout=15)
         if r.returncode:
             return r.stdout.strip() or 'Could not do that. ydotool may not be set up (see README).', False
         return r.stdout.strip() or 'Done.', True
@@ -3855,7 +3896,7 @@ def report(task, reply, ran, secs, why):
     """Settings → Help improve Atticus (off until the user says yes): a task that failed goes to the maker, cleaned."""
     if POSTHOG_KEY and pref('improve', False) and os.environ.get('ATTICUS_LIVE') != '1':
         posthog('task_failed', {'task': clean(task), 'reply': clean(reply), 'steps': [clean(c) for c in list(ran)[:12]], 'why': why,
-                                'secs': round(secs, 1), 'model': pref('model', 'haiku')})
+                                'secs': round(secs, 1), 'model': pref('model', DEFAULT_MODEL)})
 
 
 def report_error(kind, **props):
@@ -4924,7 +4965,7 @@ def read_only_tool(tool, inp, ask, cwd=None):
 
 def agent_model():
     if str(pref('apiBase', '')).strip():
-        return str(pref('agentApiModel', '')).strip() or str(pref('apiModel', '')).strip() or pref('model', 'haiku')
+        return str(pref('agentApiModel', '')).strip() or str(pref('apiModel', '')).strip() or pref('model', DEFAULT_MODEL)
     return 'haiku' if routing_mode() == 'cheapest' else work_model()
 
 
@@ -7847,7 +7888,7 @@ def meeting_demo():
 
 
 def feedback(data):
-    model = pref('model', 'haiku')
+    model = pref('model', DEFAULT_MODEL)
     model = model if model in ('haiku', 'sonnet', 'opus') else 'custom'
     mac = subprocess.run(['/usr/sbin/sysctl', '-n', 'hw.model'], capture_output=True, text=True).stdout.strip()
     text = str(data.get('text', '')).strip()[:4000]   # what the user typed in Settings; they see it in the preview before it goes anywhere

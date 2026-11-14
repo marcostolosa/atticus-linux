@@ -135,6 +135,8 @@ def main():
             self._vad_busy = False
             self._heard_word = False     # this recording starts with the wake word itself
             self._about_device = False   # the last thing done or asked was about a smart-home device
+            self._retry = False          # this recording is the second try after "não entendi"
+            self._asked = ""             # the request the brain is working on
             self.recorder = Recorder()
             self.transcriber = Transcriber()
             self.speaker = Speaker()
@@ -147,6 +149,7 @@ def main():
                 on_prompt=self._on_prompt)
             self.transcriber.warm()
             self.speaker.warm()
+            self._show_models()
             if cfg.get("bargeIn", True):
                 threading.Thread(target=self._setup_echo, daemon=True).start()
             self._last_answer = ""
@@ -172,6 +175,15 @@ def main():
             # Hold the app alive without a visible window until the hotkey fires.
             self._hold = Gio.Application.hold(app)
             self.overlay.window.set_visible(False)
+
+        MODELS = ("haiku", "sonnet", "opus", "fable")   # names the `claude` command takes; each is the newest of its line
+
+        def _show_models(self):
+            # The model menu beside the text field. With a custom server
+            # (apiBase) the server decides, so there is nothing to choose.
+            pick = cfg.get("model", "sonnet")
+            names = [] if cfg.get("apiBase") else list(self.MODELS)
+            self.overlay.call("models", {"list": names, "pick": pick if pick in names else "sonnet"})
 
         def _rearm_alarms(self):
             try:
@@ -312,11 +324,31 @@ def main():
                     "}))")
 
         def _on_wake(self):
-            # Ignore the keyword while already listening or mid-answer.
-            if self.listening or self.bridge.running():
+            # The word always wins: whatever Atticus is doing (thinking,
+            # speaking, waiting on a card) stops and it listens. Only while
+            # it is already recording is there nothing to stop.
+            if self._barge_pending is not None:
+                self._barge_pending["wake"] = True   # being recorded right now: the word settles what it was
+                self.wake.release()
+                return
+            if self.listening:
                 self.wake.release()
                 return
             self._begin_listen(wake=True)
+
+        def _wake_during(self, speaking):
+            """Keep waiting for the word while Atticus thinks or speaks.
+            While it speaks only the echo-free microphone will do: on the
+            plain one its own voice covers the person's."""
+            if not self.wake or self.listening:
+                return
+            if not speaking:
+                self.wake.resume()
+            elif self._aec and self.speaker.last_echo_free:
+                from . import echo
+                self.wake.resume(device=echo.SOURCE)
+            else:
+                self.wake.pause()
 
         @staticmethod
         def _log(event, **details):
@@ -434,13 +466,24 @@ def main():
                 return False   # cancelled meanwhile; _cancel already stopped the voice
             from . import echo
             from .speech import is_phantom
-            said = echo.own_words((text or "").strip(), pend["spoken"])
+            heard, called = (text or "").strip(), bool(pend.get("wake"))
+            if self.wake and heard:
+                from .wakeword import said as after_word
+                rest = after_word(heard, self.wake.word)
+                called, heard = called or rest != heard, rest
+            said = echo.own_words(heard, pend["spoken"])
             if is_phantom(said):
                 said = ""
-            self._log("over the speech", heard=text, taken_as=said)
+            self._log("over the speech", heard=text, taken_as=said, called=called)
+            if not said and called:
+                # Just the word, over the voice: stop and hear what comes next.
+                self._speaking = False
+                self._begin_listen(wake=True)
+                return False
             if not said:
                 self.speaker.resume()        # only its own voice: carry on
                 return False
+            self._keep_unfinished()
             self._gen += 1                   # the held speech must not reopen the mic when it ends
             self.speaker.stop()
             self._speaking = False
@@ -456,16 +499,21 @@ def main():
             self._start_brain(said)
             return False
 
-        def _begin_listen(self, wake=False, followup=False):
+        def _begin_listen(self, wake=False, followup=False, retry=False):
             if self.listening:
                 return
             self._disarm_barge()
             # followup: the mic opened by itself after an answer. If nobody
             # speaks it closes without a sound and nothing is transcribed.
             self._followup = followup
-            if not followup:
+            self._retry = retry
+            # Called in the middle of something: that is the same conversation
+            # going on, so what was being talked about stays.
+            midway = self._speaking or self.bridge.running()
+            if not (followup or retry or midway):
                 self._about_device = False   # a new conversation
-            self._log("listening", wake=wake, followup=followup)
+            self._keep_unfinished()
+            self._log("listening", wake=wake, followup=followup, retry=retry, midway=midway)
             # Barge-in: starting a new recording interrupts whatever Atticus is
             # doing right now — speaking an answer, or waiting on an interactive
             # card from a now-abandoned ask — so the mic never records its own
@@ -506,6 +554,17 @@ def main():
                 self.overlay.call("reset")     # clear any previous conversation
             self.overlay.call("listen")        # creates a fresh voice turn (q/steps/answer)
             self._level_source = GLib.timeout_add(60, self._tick_level)
+
+        def _keep_unfinished(self):
+            """The brain is about to be stopped mid-request. It only writes a
+            turn down when it finishes one, so write this one here: what
+            comes next ("não, o outro", "continua") can then refer to it."""
+            asked, self._asked = self._asked, ""
+            if not asked or not self.bridge.running():
+                return
+            from . import recent
+            said = self._speaking_text if self._speaking else ""
+            recent.add(asked, said or "(the user interrupted before there was an answer)")
 
         def _tick_level(self):
             if not self.listening:
@@ -656,6 +715,7 @@ def main():
                         self._log("follow-up dropped: no voice in it")
                         audio = None
                 text = self.transcriber.transcribe(audio) if audio is not None else ""
+                heard_voice = False
                 if word and text:
                     # The recording began with the wake word, which helps a
                     # one-word request be understood ("Siri, para") and is
@@ -675,18 +735,52 @@ def main():
                     if is_phantom(text):
                         self._log("follow-up dropped: noise read as words", text=text)
                         text = ""
+                if not text and not guard and audio is not None:
+                    # Asked for by name or by the key, and nothing could be
+                    # read. Was there a voice at all? Left out: the word
+                    # itself and the 0.3 s after it, which still hold its end.
+                    from .speech import SAMPLE_RATE, speech_seconds
+                    rest = audio[int((lead + 0.3) * SAMPLE_RATE):] if word else audio
+                    heard_voice = speech_seconds(rest, 0.3) >= 0.25
             except Exception:
                 import traceback
                 traceback.print_exc()
-                text = ""
-            GLib.idle_add(self._after_transcribe, text, gen)
+                text, heard_voice = "", False
+            GLib.idle_add(self._after_transcribe, text, gen, heard_voice)
 
-        def _after_transcribe(self, text, gen):
+        def _ask_again(self, gen):
+            """A voice, but no words made out: ask once for it to be said again."""
+            en = str(self.transcriber.last_language or cfg.get("asrLanguage", "")).lower().startswith("en")
+            text = "Sorry, I didn't catch that. Can you say it again?" if en else "Não entendi. Pode repetir?"
+            self._log("not understood: asking again")
+            self.overlay.call("msg", text)
+            self._speaking = True
+            self._speak_gen = self._gen
+            self._last_answer = ""
+            self._speaking_text = text
+
+            def again():
+                self._speaking = False
+                if gen == self._gen and not self.listening:
+                    self._begin_listen(wake=True, retry=True)
+                return False
+            self.speaker.speak(text, "en" if en else "pt", done=lambda: GLib.idle_add(again))
+
+        def _after_transcribe(self, text, gen, heard_voice=False):
             if gen != self._gen:
                 return False   # superseded by a newer session or a cancel; drop it
             text = (text or "").strip()
             self._log("heard", text=text, by=self.transcriber.last_engine)
+            if not text and heard_voice and not self._retry:
+                self._ask_again(gen)
+                return False
             if not text:
+                if self._retry:
+                    # Second try and still nothing: give up, with a sound
+                    # that says so. The user calls again when they want.
+                    self._log("not understood twice: closing")
+                    self.earcons.play("cancel")
+                self._retry = False
                 self.overlay.call("msg", "")
                 self._resume_wake()   # nothing heard: go back to waiting for the keyword
                 self._schedule_autohide()
@@ -711,6 +805,7 @@ def main():
             self.speaker.speak(text, self.transcriber.last_language,
                                done=self._on_speech_done)
             self._arm_barge()
+            self._wake_during(True)
 
         def _on_speech_done(self):
             # Runs on the TTS watcher thread; hop back to the GLib main thread.
@@ -835,11 +930,16 @@ def main():
             self._speaking_text = reply
             self.speaker.speak(reply, intent.lang, done=self._on_speech_done)
             self._arm_barge()
+            self._wake_during(True)
+            from . import recent
+            recent.add(text, reply)   # so the model knows what "ele" is in the next request
             return False
 
         def _ask_brain(self, text):
             front = self._front_app()
+            self._asked = text
             self.bridge.ask(text, front_app=front)
+            self._wake_during(False)   # saying the word stops the thinking too
 
         def _cancel(self):
             self._gen += 1   # invalidate any transcription still in flight
@@ -863,6 +963,7 @@ def main():
             # can answer hands-free. The panel buttons stay live the whole time.
             self._prompt = {"kind": kind, **data}
             self._answer_tries = 0
+            self._log("card", kind=kind, asks=data.get("q", ""))
             self._cancel_autohide()
             self.overlay.present()
             self._speak_prompt(first=True)
@@ -881,6 +982,7 @@ def main():
             self._speaking_text = text
             self.speaker.speak(text, lang, done=after)
             self._arm_barge()
+            self._wake_during(True)
 
         def _prompt_speech(self, p, first):
             en = str(self.transcriber.last_language or cfg.get("asrLanguage", "")).lower().startswith("en")
@@ -891,6 +993,9 @@ def main():
                 else:
                     tail = ("Tento de novo? Diga sim ou não."
                             if p.get("retry") else "Posso? Diga sim ou não.")
+                if first and base.endswith("?") and not p.get("retry"):
+                    # the card already asks ("Clicar em Entrar?"): only say how to answer
+                    return base + (" Say yes or no." if en else " Diga sim ou não.")
                 return (base + (". " if base else "") + tail) if first else tail
             q = (p.get("q") or "").strip()
             opts = p.get("options") or []
@@ -1006,6 +1111,11 @@ def main():
                 else:
                     self.bridge.answer_pick(body["pick"])
                 return
+            if body.get("models"):
+                self._show_models()
+            if body.get("model") in self.MODELS:
+                cfg.set("model", body["model"])     # the next request uses it
+                self._log("model", chosen=body["model"])
             if "send" in body and isinstance(body["send"], str):
                 self._submit_typed(body["send"])
             if body.get("type"):

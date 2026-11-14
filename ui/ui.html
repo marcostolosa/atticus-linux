@@ -1244,7 +1244,7 @@
     language(value) { window.i18n?.setLanguage(value); },
     mode(safe) { $('mode').classList.toggle('on', !safe); },
     models({ list, pick }) {   // Claude's models, or the custom server's; none for a client without a choice
-      const name = v => ({cheapest: 'Cheapest', balanced: 'Balanced', capable: 'Most capable'})[v] || (/^(haiku|sonnet|opus)$/.test(v) ? v[0].toUpperCase() + v.slice(1) : v);
+      const name = v => ({cheapest: 'Cheapest', balanced: 'Balanced', capable: 'Most capable'})[v] || ({haiku: 'Haiku 5.5', sonnet: 'Sonnet 5.5', opus: 'Opus 5.5', fable: 'Fable 5.2'})[v] || v;
       $('model').hidden = !list.length; $('model').textContent = name(pick); window.i18n?.refresh();
       $('models').replaceChildren(...list.map(v => { const b = document.createElement('button'); b.dataset.v = v; b.textContent = name(v); b.classList.toggle('on', v === pick); b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', v === pick); return b; }));
       spread();

@@ -94,3 +94,38 @@ class Gate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScreenActions(unittest.TestCase):
+    """The Allow card for a click names the thing, never where it is."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.brain = load()
+        cls.brain.pref = lambda key, default: "pt" if key == "asrLanguage" else default
+
+    def test_click_is_asked_by_name(self):
+        run, question, how = self.brain.hands_plan(["click", "812", "430", "botão Entrar"])
+        self.assertEqual(run, ["click", "812", "430"])
+        self.assertEqual(question, "Clicar em “botão Entrar”?")
+        self.assertNotIn("812", question + how)
+
+    def test_double_and_right_click(self):
+        run, question, _ = self.brain.hands_plan(["click", "10", "20", "pasta Fotos", "double"])
+        self.assertEqual((run, question), (["click", "10", "20", "double"], "Dar dois cliques em “pasta Fotos”?"))
+        self.assertIn("botão direito", self.brain.hands_plan(["click", "10", "20", "right", "o arquivo"])[1])
+
+    def test_a_click_with_no_name_is_sent_back(self):
+        for args in (["click", "812", "430"], ["click", "812", "430", "812, 430"], ["drag", "1", "2", "3", "4"]):
+            run, hint, _ = self.brain.hands_plan(args)
+            self.assertIsNone(run, args)
+            self.assertIn("in the user's language", hint)
+
+    def test_keys_are_named(self):
+        run, question, _ = self.brain.hands_plan(["press", "ctrl+t", "abrir uma aba nova"])
+        self.assertEqual((run, question), (["press", "ctrl+t"], "Apertar Ctrl + T para abrir uma aba nova?"))
+        self.assertEqual(self.brain.hands_plan(["press", "Tab", "3"])[0], ["press", "Tab", "3"])
+
+    def test_the_step_line_names_it_too(self):
+        self.assertEqual(self.brain.hands_label('click 812 430 "botão Entrar"'), "Clicking “botão Entrar”")
+

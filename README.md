@@ -145,7 +145,8 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `followUp` | `"always"` | After an answer, open the microphone again so a reply needs no wake word. `"question"`: only when Atticus ends on a question. `false`: never. |
 | `followUpSeconds` | `3` | How long that follow-up waits for a voice before closing in silence. |
 | `bargeIn` | `true` | Keep listening while Atticus speaks (through PipeWire echo cancellation) so talking over it stops the speech and is taken as the next request. |
-| `bargeLevel` | `0.12` | How loud a voice must be to interrupt. Lower it if talking over Atticus is not noticed. |
+| `bargeVad` | `0.6` | How sure the voice detector must be that someone is talking over Atticus (0 to 1). Lower it if talking over it is not noticed. |
+| `model` | `"sonnet"` | Which Claude model answers: `"haiku"` (fastest), `"sonnet"`, `"opus"` or `"fable"`. Also in the model menu beside the text field. Everyday commands (time, timers, volume, lights) never wait for a model. |
 | `safe` | `true` | Sandbox and Allow cards (see Safety). |
 | `haUrl`, `haToken` | unset | Home Assistant address and a long-lived access token, for smart-home control. |
 | `micFix` | `true` | Set a sane capture volume at startup. |

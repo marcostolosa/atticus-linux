@@ -1439,7 +1439,7 @@ def playlist(name):
     if hit() or fresh:
         return hit()   # rescan at most hourly: mid-speech checks call this on every word
     ids = set()   # not known yet: read every playlist id from the cache, name the new ones (once each, saved)
-    for root, _, files in os.walk(os.path.join(HOME, 'Library/Application Support/Spotify')):
+    for root, _, files in (row for folder in ('.cache/spotify', '.config/spotify', '.var/app/com.spotify.Client/cache/spotify') for row in os.walk(os.path.join(HOME, folder))):
         for f in files:
             try:
                 ids |= set(re.findall(rb'spotify:playlist:([A-Za-z0-9]{22})', Path(root, f).read_bytes()))
@@ -1512,125 +1512,31 @@ def spotify_item(name, anything=True, exact=False):
     return None
 
 
-def play(name, anything=True):
-    """Play the user's playlist by that name; else (anything=True) the top Spotify song, album or artist for it from the web."""
+def play(name, anything=True, mix=False):
+    """Play what the user named. With Spotify installed: their playlist by that name, else (anything=True) the top
+    Spotify song, album or artist for it. Without it: the sound of the best match on YouTube, through mpv."""
+    from atticus_shell import music
+    if not music.spotify_command():
+        return music.play(name, mix) if anything else None
     p = spotify_item(name, anything)
     if not p: return None
-    mine = osa('tell application "System Events" to get name of first process whose frontmost is true')
-    try:
-        # Spotify reports "paused" for a moment after play track (longer while it launches): wait, then ask once more
-        played = subprocess.run(['osascript', '-e', 'on run argv\ntell application "Spotify"\nrepeat with attempt from 1 to 2\n'
-                                 'play track (item 1 of argv)\nrepeat 15 times\nif player state is playing then return "playing"\n'
-                                 'delay 0.1\nend repeat\nend repeat\nreturn player state as text\nend tell\nend run', p[0]],
-                                capture_output=True, text=True, timeout=30)
-    except subprocess.TimeoutExpired:
-        return f'Could not start {p[1]} in Spotify: the playback command timed out.'
-    except OSError as e:
-        return f'Could not start {p[1]} in Spotify: {e}.'
-    if played.returncode:
-        if '-1743' in played.stderr:
-            return ('Could not control Spotify: macOS denied Automation permission. '
-                    'Enable Spotify under Atticus in System Settings > Privacy & Security > Automation, then try again.')
-        return f'Could not start {p[1]} in Spotify: {played.stderr.strip() or "AppleScript failed"}.'
-    if played.stdout.strip().lower() != 'playing':
-        return f'Could not start {p[1]} in Spotify: playback did not reach the playing state.'
-    preview_app('Spotify', 'play')
-    if not wants_focus(): keep_behind(mine, 'Spotify')   # Spotify raises itself when it starts a track
-    return f'Playing {on_spotify(p[1])}.'
+    mine = front()[0]
+    reply = music.spotify_play(p[0], p[1])
+    if reply.startswith('Playing') and not wants_focus(): keep_behind(mine, 'Spotify')   # it comes forward when it starts
+    return reply
 
 
 def on_spotify(name):
-    return name if re.search(r'\bspotify\b', name, re.I) else name + ' on Spotify'   # Spotify's own playlists end in "on Spotify"
-
-
-def _spotify_ax_strings(m):
-    return (m or {}).get('texts', []) + [n.get('label', '') for n in (m or {}).get('nodes', [])]
-
-
-def _spotify_control(m, words, title=''):
-    """Return the actual AX label for a Spotify control; never guess an unseen label."""
-    hits = [n for n in (m or {}).get('nodes', []) if all(w in plain(n.get('label', '')) for w in words)]
-    if words == ('queue',):
-        hits = [n for n in hits if 'add' not in plain(n.get('label', ''))]
-    if not hits: return None
-    key = norm(re.split(r'\s+[-–|]\s+', title, maxsplit=1)[0])
-    if key:
-        hits = [n for n in hits if ' for ' not in n.get('label', '').lower() or norm(re.split(r'\s+for\s+', n['label'], maxsplit=1, flags=re.I)[-1]) == key]
-    return max(hits, key=lambda n: plain(n.get('label', '')) == ' '.join(words))['label'] if hits else None
-
-
-def _spotify_wait_control(words, title='', first=None):
-    for attempt in range(10):
-        m = first if attempt == 0 and first else hands_map('Spotify')
-        label = _spotify_control(m, words, title)
-        if label and (not title or _spotify_title_anchor(m, title)):
-            return m, label
-        time.sleep(.15)
-    return None, None
-
-
-def _spotify_title_anchor(m, title):
-    key = norm(re.split(r'\s+[-–|]\s+', title, maxsplit=1)[0])
-    return next((s for s in _spotify_ax_strings(m) if norm(s) == key), '')
-
-
-def _spotify_verified(text, m, title='', action=False):
-    strings = text.splitlines() + _spotify_ax_strings(m)
-    key = norm(re.split(r'\s+[-–|]\s+', title, maxsplit=1)[0])
-    if key:
-        identified = any(norm(s) == key for s in strings)
-        return identified and (not action or any('added' in plain(s) and 'queue' in plain(s) for s in strings))
-    return any('added' in plain(s) and 'queue' in plain(s) for s in strings)
+    return name
 
 
 def queue(name):
-    """Add one resolved Spotify track through its accessible controls without leaving Spotify in front."""
-    try:
-        p = spotify_item(name, exact=True)
-    except (OSError, RuntimeError) as e:
-        return str(e)
-    if not p: return 'No matching Spotify result in web search; this does not search your full private library.'
-    parts = p[0].split(':', 2)
-    if len(parts) != 3 or parts[1] != 'track':
-        kind = parts[1] if len(parts) == 3 else 'item'
-        return (f'Spotify does not expose the tracks in that {kind} to Atticus, so it cannot queue them in order. '
-                'Name one song to add to the queue.')
-    mine = osa('tell application "System Events" to get name of first process whose frontmost is true')
-    try:
-        opened = subprocess.run(['open', '-g', p[0]], capture_output=True)
-    except OSError:
-        opened = None
-    if not opened or opened.returncode:
-        return f'Could not open {p[1]} in Spotify.'
-    preview_app('Spotify', 'queue')
-    keep_behind(mine, 'Spotify')
-    m, more = _spotify_wait_control(('more', 'option'), p[1])
-    if not more:
-        return f'Opened {p[1]} in Spotify, but could not find its More options control.'
-    anchor = _spotify_title_anchor(m, p[1])
-    result, ok = hands('click', more, *(['near', anchor] if anchor else []))
-    keep_behind(mine, 'Spotify')
-    if not ok:
-        return f'Could not open More options for {p[1]}: {result}'
-    m, add = _spotify_wait_control(('add', 'queue'), first=cached_hands())
-    if not add:
-        return f'Opened More options for {p[1]}, but Spotify did not offer Add to queue.'
-    result, ok = hands('click', add)
-    keep_behind(mine, 'Spotify')
-    if not ok:
-        return f'Could not add {p[1]} to the Spotify queue: {result}'
-    m = cached_hands() or {}
-    if not _spotify_verified(result, m, p[1], action=True):
-        m, show_queue = _spotify_wait_control(('queue',), first=m)
-        if show_queue:
-            shown, shown_ok = hands('click', show_queue)
-            keep_behind(mine, 'Spotify')
-            m = cached_hands() or {}
-            if shown_ok and _spotify_verified(shown, m, p[1]):
-                return f'Added {p[1]} to your Spotify queue.'
-        return (f'Spotify accepted Add to queue for {p[1]}, but Atticus could not verify it. '
-                'It may already be queued; do not retry blindly.')
-    return f'Added {p[1]} to your Spotify queue.'
+    """Add one more after what is playing. The Spotify app takes no queue from outside, so this is for the player
+    Atticus starts itself."""
+    from atticus_shell import music
+    if music.spotify_command() and not music.running():
+        return 'The Spotify app does not let Atticus add to its queue. Play the song now, or add it in Spotify.'
+    return music.queue(name)
 
 
 LAST = os.path.join(DIR, 'last_app')
@@ -5608,7 +5514,8 @@ def system_prompt(risky):
                   ' People: there is no address book to read here; ask who is meant when it is not clear, never guess.'),
                  (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',
                   ' There is no calendar helper on this system: use --remind for things to be reminded of, and say so if a real calendar event was asked for.'),
-                 (f'- Spotify: {PLAY} "<name>" plays; {QUEUE} "<track>" queues.\n', LINUX_TOOLS),
+                 (f'- Spotify: {PLAY} "<name>" plays; {QUEUE} "<track>" queues.\n',
+                  f'- Music by name: {PLAY} "<song, artist, album or playlist>" [mix] plays it (the Spotify app when installed, else its sound from YouTube); mix lines up more like it. {QUEUE} "<track>" adds one after it. Pause/next/stop: --media.\n' + LINUX_TOOLS),
                  ('Open Atticus Settings: open -a Atticus. ', 'Atticus settings live in ~/.config/atticus/settings.json. '),
                  ('- App/site: always try; never blame sandbox/Terminal. Name the denied Settings switch.\n', '- App/site: always try.\n'))
         for old, new in swaps:
@@ -8020,10 +7927,11 @@ def main():
         return say('✓', r)
     if args[:1] == ['--play']:
         try:
-            reply = play(' '.join(args[1:]))
+            mix = len(args) > 2 and args[-1] == 'mix'
+            reply = play(' '.join(args[1:-1] if mix else args[1:]), mix=mix)
         except (OSError, RuntimeError) as e:
             reply = str(e)
-        return print(reply or 'No matching Spotify result in web search; this does not search your full private library.')
+        return print(reply or 'Found nothing by that name to play.')
     if args[:1] == ['--queue']:
         return print(queue(' '.join(args[1:])))
     if args == ['--state']:   # the Settings window: usage, saved rules, Claude plan

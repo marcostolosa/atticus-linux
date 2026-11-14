@@ -132,8 +132,8 @@ class Controls(unittest.TestCase):
             self.assertTrue(i and i.kind == "media" and i.args["action"] == action, text)
         self.assertEqual(p("que música é essa").kind, "playing")
 
-    def test_play_something_goes_to_the_model(self):
-        for text in ("toca Legião Urbana", "play some jazz", "toca aquela do Skank"):
+    def test_a_vague_request_for_music_goes_to_the_model(self):
+        for text in ("toca aquela do Skank", "toca alguma coisa", "play that one from the movie"):
             self.assertIsNone(p(text), text)
 
     def test_misc(self):
@@ -275,3 +275,18 @@ class HomeState(unittest.TestCase):
         lamp = {"name": "Luz do Quarto", "domain": "light"}
         self.assertEqual(I._state_text(lamp, "on", {"brightness": 128}, True), "Luz do Quarto está acesa, em 50%.")
         self.assertIn("fora do ar", I._state_text(lamp, "unavailable", {}, True))
+
+
+class Music(unittest.TestCase):
+    def test_something_named_is_music(self):
+        for said, name, mix in (("toca Tim Maia", "tim maia", False), ("Toca a música Evidências", "evidencias", False),
+                                ("toca músicas do Djavan", "djavan", True), ("play Bohemian Rhapsody", "bohemian rhapsody", False),
+                                ("quero ouvir jazz", "jazz", False), ("play some jazz", "jazz", False)):
+            i = I.parse(said)
+            self.assertEqual((i.kind, i.args["name"], i.args["mix"]), ("music", name, mix), said)
+
+    def test_what_was_playing_is_not_a_name(self):
+        for said in ("toca", "toca a música", "toca de novo", "play", "continua a música"):
+            i = I.parse(said)
+            self.assertTrue(i is None or i.kind != "music", said)
+

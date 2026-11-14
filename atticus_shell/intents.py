@@ -426,6 +426,13 @@ def parse(text: str, now: float | None = None, home: bool | None = None, device:
     if re.fullmatch(rf"(?:anterior|volta|voltar|previous|back)(?:{music})|(?:musica|faixa|song|track) anterior|"
                     rf"(?:previous|last) (?:song|track)|volta (?:uma|a) (?:musica|faixa)", t):
         return I("media", action="previous")
+    # "toca Tim Maia": something named, not what was already playing
+    m = re.fullmatch(r"(?:toca|toque|tocar|bota pra tocar|coloca pra tocar|poe pra tocar|quero ouvir|play|put on|i want to hear)"
+                     r"(?P<mix> (?:musicas?|sons?|umas? musicas?|um som|songs|music|some music)(?: d[eoa]s?| by| from| of)?)?"
+                     r"(?: (?:a musica|o som|a banda|o album|o disco|a playlist|the song|the album|the band|some|um pouco de))? (?P<name>.+)", t)
+    if m and not re.fullmatch(r"ai|isso|essa|esse|de novo|novamente|outra|outra vez|mais (?:alto|baixo)|again|that|this|it|"
+                              r"(?:alguma coisa|algo|something)|(?:aquel[ae]s?|that one|the one)\b.*", m.group("name")):   # "aquela do Skank": the model works out which
+        return I("music", name=m.group("name"), mix=bool(m.group("mix")))
     if re.fullmatch(r"(?:que|qual) (?:musica|som|faixa) (?:e essa|esta tocando|ta tocando|e esse|e esta|toca agora)|"
                     r"(?:o que|oq) (?:esta|ta) tocando|what(?:'s| is) (?:playing|this song)(?: now)?|what song is this", t):
         return I("playing")
@@ -712,6 +719,19 @@ def run(i: Intent, hush=None) -> str | None:
             return ("Não há nada tocando." if pt else "Nothing is playing.") if "nothing" in err else None
         return {"pause": "Pausado." if pt else "Paused.", "play": "Tocando." if pt else "Playing.",
                 "next": "Próxima." if pt else "Next.", "previous": "Anterior." if pt else "Previous."}[a["action"]]
+    if i.kind == "music":
+        from . import music
+        if music.spotify_command():
+            return None   # the Spotify app is here: the model finds the item there and plays it
+        said = music.play(a["name"], a["mix"])
+        if said.startswith("Playing "):
+            title = said[len("Playing "):].removesuffix(" More like it follow.").rstrip(".")
+            return (f"Tocando {title}." + (" Depois vêm outras parecidas." if a["mix"] else "")) if pt else said
+        if said.startswith("Found nothing"):
+            return f"Não achei nada para tocar com {a['name']}." if pt else said
+        if said.startswith("Started "):
+            return "Está carregando, já começa." if pt else "It is loading and starts in a moment."
+        return None
     if i.kind == "playing":
         p = A.now_playing()
         if not p or not p["title"]:

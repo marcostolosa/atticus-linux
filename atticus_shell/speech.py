@@ -1,9 +1,8 @@
-"""Speech-to-text — the Linux replacement for Apple's on-device recognizer.
+"""Speech-to-text, fully local.
 
-macOS used SFSpeechRecognizer for live, on-device transcription. We use
-faster-whisper (CTranslate2) locally. v1 records while the hotkey is held and
-transcribes on release; a live RMS level drives the orb. Streaming partial
-words can be layered on later with chunked/VAD decoding.
+faster-whisper (CTranslate2) transcribes on this machine: nothing is sent
+anywhere. A recording runs from the hotkey / wake word until release or
+trailing silence and is transcribed at the end; a live RMS level drives the orb.
 
 Audio is captured with PipeWire's parecord/pw-record as 16 kHz mono s16le — no
 Python audio C-extension (portaudio) required.
@@ -109,7 +108,10 @@ class Transcriber:
     def __init__(self, model_size: Optional[str] = None, language: Optional[str] = None):
         # "small" is multilingual and noticeably better at pt-BR than "base",
         # while staying fast with int8 on CPU.
-        self.model_size = model_size or os.environ.get("ATTICUS_WHISPER_MODEL", "small")
+        # Settings "asrModel": "base" answers about 2 s sooner on a laptop CPU
+        # but mishears more; "small" is the default; a GPU host can go larger.
+        self.model_size = (model_size or os.environ.get("ATTICUS_WHISPER_MODEL")
+                           or _setting("asrModel") or "small")
         # Language is configurable (public repo): "auto" detects per utterance,
         # or pin it (e.g. "pt", "en") to remove detection errors on short clips
         # and decode that language far better. Default auto so any user is served;

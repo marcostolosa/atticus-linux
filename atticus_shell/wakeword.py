@@ -130,7 +130,22 @@ class WakeListener:
         try:
             if self._engine == "livekit":
                 from livekit.wakeword import WakeWordModel
-                self._lk = WakeWordModel(models=[self.model_file], sample_rate=SAMPLE_RATE)
+                # One thread, no spin-waiting: onnxruntime's default pool busy-
+                # waits between the 80 ms frames, which measured ~22% of a core
+                # while idle. A frame takes ~5 ms on one thread, so this is all
+                # the model needs and idle cost drops to a few percent.
+                opts = None
+                try:
+                    import onnxruntime as ort
+                    opts = ort.SessionOptions()
+                    opts.intra_op_num_threads = 1
+                    opts.inter_op_num_threads = 1
+                    opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
+                    opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
+                except Exception:
+                    opts = None
+                self._lk = WakeWordModel(models=[self.model_file], sess_options=opts,
+                                         sample_rate=SAMPLE_RATE)
             else:
                 from faster_whisper import WhisperModel
                 self._whisper = WhisperModel(self.wake_model_size, device="cpu", compute_type="int8")

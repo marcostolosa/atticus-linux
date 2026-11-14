@@ -34,15 +34,34 @@ speech) is rewritten for Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
 
 - Corner overlay that never steals focus, built on wlr-layer-shell.
 - Push to talk by hotkey, plus an optional always-on wake word ("siri").
-- Speech recognition tuned for Brazilian Portuguese (faster-whisper), English also supported.
-- Natural neural voice with Piper, falling back to espeak-ng if no voice is installed.
-- Short sounds when listening starts and stops, so you know it heard you.
+- Speech recognition tuned for Brazilian Portuguese (faster-whisper), English also supported. Fully local.
+- Natural neural voice with Piper, kept loaded so answers start speaking at once.
+- **Instant commands, no AI round trip** (Portuguese and English): timers, alarms,
+  reminders, volume, brightness, play / pause / next, shopping and to-do lists,
+  Wi-Fi and Bluetooth, lock screen, open an app or a site, time and date.
+- Timers, alarms and reminders ring, notify and speak, survive a restart, and can repeat daily or on weekdays.
+- Routines: "every weekday at 8, tell me the weather and the news" runs by itself and is read aloud.
+- Smart home through a Home Assistant server: lights, plugs, climate, covers, locks, scenes.
+- Conversation mode: when Atticus ends on a question, the microphone opens for your reply.
 - Screen reading (grim, tesseract) and web search when a request calls for it.
-- Native click, typing, key presses and window placement, driven by what it
-  reads off a screenshot — "click the Save button", "type my reply", "put
-  this on the left half of the screen".
+- Native click, typing, key presses and window placement, driven by what it reads off a screenshot.
 - Local file search ("find my resume").
-- Runs as a systemd user service.
+- Everything else goes to the model, which has the same abilities as tools.
+- No telemetry. Runs as a systemd user service.
+
+## Safety
+
+The model can run shell commands, so they go through a gate (`atticus_shell/sandbox.py`):
+
+| Kind | What happens |
+| --- | --- |
+| Atticus helpers and plain desktop controls (volume, media, notifications, read-only queries) | run as written |
+| Any other command | runs inside a bubblewrap sandbox: files read-only, keys / passwords / browser profiles hidden, no network, no access to the desktop session |
+| A command that must really change something (`outside <command>`) | you see the exact command on an Allow card first, answerable by voice or click |
+| `rm`, `sudo`, power-off, `git push`, piping a download into a shell | never run |
+
+The model's file reader also refuses keys, tokens, browser profiles and Atticus's own data.
+Clicks and key presses ask first. `"safe": false` in settings turns the sandbox and cards off.
 
 ## Requirements
 
@@ -50,7 +69,8 @@ speech) is rewritten for Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
 - System packages: `webkitgtk-6.0`, `gtk4-layer-shell`, `python-gobject`,
   `pipewire-pulse`, `grim`, `slurp`, `wl-clipboard`, `tesseract`,
   `tesseract-data-eng`, `tesseract-data-por`, `espeak-ng`, `ffmpeg`, `fd`,
-  `ripgrep`, `ydotool`, `playerctl`.
+  `ripgrep`, `ydotool`, `wtype`, `playerctl`, `bubblewrap`, `libnotify`,
+  `wireplumber`, `brightnessctl`.
 - Python 3.11 or newer.
 - A command-line assistant for the brain. By default Atticus calls the
   [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude`),
@@ -115,10 +135,34 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `sounds` | `true` | Play the start and stop chimes. |
 | `wake` | `false` | Enable the always-on wake word. |
 | `wakeWord` | `"siri"` | The word that starts listening. |
+| `asrModel` | `"small"` | Whisper model. `"base"` answers about 2 s sooner on a laptop CPU but mishears more. |
+| `instant` | `true` | Run everyday commands locally without the AI. |
+| `followUp` | `true` | Open the microphone when Atticus ends on a question. |
+| `safe` | `true` | Sandbox and Allow cards (see Safety). |
+| `haUrl`, `haToken` | unset | Home Assistant address and a long-lived access token, for smart-home control. |
 | `micFix` | `true` | Set a sane capture volume at startup. |
 | `micVolume` | `45` | Capture volume percent when `micFix` is on. |
 
 Restart the service after editing: `systemctl --user restart atticus`.
+
+## Things to say
+
+```
+Coloca um timer de 10 minutos para o macarrão      Me acorda amanhã às 7
+Me lembra de tomar o remédio todo dia às 8         Quanto tempo falta no timer?
+Aumenta o volume · Volume em 40% · Muta o som      Pausa · Próxima · Que música é essa?
+Adiciona leite e ovos na lista de compras          O que tem na lista de compras?
+Liga a luz da sala · Apaga a luz do quarto         Abre o Chromium · Bloqueia a tela
+```
+
+Anything else ("qual a previsão do tempo?", "o que tem na minha tela?", "abre o canal
+do … no YouTube") goes to the model.
+
+## Tests
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
 
 ## Wake word
 

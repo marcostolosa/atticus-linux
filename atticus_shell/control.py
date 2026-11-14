@@ -59,6 +59,7 @@ class ControlServer:
                 break
             with conn:
                 try:
+                    conn.settimeout(2)   # a client that connects and never writes must not stall the hotkey
                     data = conn.recv(65536).decode("utf-8", "replace").strip()
                 except OSError:
                     continue

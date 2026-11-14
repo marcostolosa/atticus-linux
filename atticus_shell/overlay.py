@@ -45,8 +45,13 @@ def _ui_language() -> str:
     lang = s.get("uiLanguage") or "auto"
     if lang and lang != "auto":
         return lang
+    # No explicit choice: someone who pinned speech recognition to a language
+    # wants the box in it too (a pt-BR speaker on an en_US system locale).
+    asr = str(s.get("asrLanguage") or "").lower()[:2]
+    if asr in ("pt", "it", "es", "fr", "de", "en"):
+        return asr
     loc = (os.environ.get("LANG") or "en").split(".")[0].split("_")[0].lower()
-    return loc if loc in ("en", "it", "es", "fr", "de") else "en"
+    return loc if loc in ("en", "pt", "it", "es", "fr", "de") else "en"
 
 
 def load_page(name: str) -> str:

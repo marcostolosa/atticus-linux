@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""macOS `open` compatibility shim for Linux.
+"""App, URL and file launcher for the brain, which calls it as `open`.
 
 The brain (atticus.py) and its AI client launch apps, URLs and files with
-macOS's `open` command. This shim gives that same interface on Hyprland/Linux:
+the `open` command. On Hyprland/Linux that means:
 
     open -a <App> [files...]   -> launch a desktop app by name (gtk-launch)
     open -g ...                -> background launch (no special focus on Wayland)

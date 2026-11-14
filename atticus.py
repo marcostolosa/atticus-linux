@@ -42,11 +42,8 @@ DRAW = shlex.quote(ME) + " --draw"
 MEMORY, RECENT = os.path.join(DIR, 'memory.md'), os.path.join(DIR, 'recent.jsonl')
 PREFS = os.path.join(DIR, 'settings.json')   # written by the Settings window
 # $5 once, sold on Gumroad. shortcut: the source is public, so a coder can delete this check; fine for a $5 app.
-GUMROAD_PRODUCT = ''   # Gumroad product ID (4o1C13Q132kPu-TW7b-sAA== when sales start); empty = free
-BUY = 'https://3370759087892.gumroad.com/l/atticus'
-KEY_FILE = os.path.join(DIR, 'license')
 # Anonymous counts, timings and error locations under a random install ID; never asks or screen content. Off in Settings → Privacy. Empty key = off.
-POSTHOG_KEY = os.environ.get('ATTICUS_POSTHOG_KEY', 'phc_mGpLLzJtYTToBF8uSkqkUxMMG9ANmQWKDBnpsRDmzy6P')   # public capture token; empty override disables
+POSTHOG_KEY = ''   # this build sends no telemetry: the upstream analytics key is removed and posthog() below is a no-op
 APP_COMMIT = 'unknown'
 try:
     APP_VERSION = Path(ME).with_name('VERSION').read_text().strip()
@@ -624,6 +621,8 @@ UI where/how asks, even if known: point, not tell; draw/explain on screen: diagr
 DENIED = ('rm', 'rmdir', 'sudo', 'dd', 'diskutil', 'shutdown', 'reboot', 'halt', 'git push', 'srm')
 DENY = [f'Bash({c}:*)' for c in DENIED]
 
+LINUX_NATIVE = ('--timer', '--alarm', '--remind', '--alarms', '--media', '--volume', '--brightness', '--notify', '--apps', '--list', '--home')
+
 def client():
     """The configured AI client name; anything unrecognized falls back to 'claude'."""
     c = pref('client', 'claude')
@@ -645,6 +644,7 @@ RISKY = [('Delete something?', r'\b(rm|rmdir|srm|unlink|shred|trash|mv)\s|\bdele
 # Atticus.swift's riskyPattern: a raw System Events click asks for the same controls --hands does
 RISKY_LABEL = r"(?i)\b(buy|purchase|pay|payment|checkout|order|send|delete|remove|trash|submit|publish|post|sign.?out|log.?out|unsubscribe|subscribe|transfer|bid|erase|withdraw|donate|authorize|grant access|allow access|logout|book|reserve|merge|deploy|discard|wipe|format|apply(?! filters| changes| settings| coupon| code| promo| discount| theme| style| formatting)|confirm)\b"
 RUNS = ('.command', '.tool', '.terminal', '.sh', '.zsh', '.bash', '.app', '.workflow', '.action')   # macOS runs these when opened
+if sys.platform != 'darwin': RUNS += ('.desktop', '.appimage', '.run', '.fish', '.py', '.pl', '.rb', '.jar')
 APP_DIRS = ('/Applications/', '/System/Applications/', os.path.join(HOME, 'Applications') + '/')
 QUIET = (DRAW, SEARCH, READ, LOOK, FRONT, SHOW, PLACE, PLAY, QUEUE, TYPE, REMEMBER, FORGET, ABOUT, PICK, SET, WEB, HISTORY, HANDS, WINDOW, f'{shlex.quote(ME)} --calendar ', 'open ', 'mdfind ', 'pbpaste')   # helpers confirm their own risky actions
 
@@ -866,6 +866,8 @@ def gate():
         '--calendar' in tokens and any(t == APP or os.path.basename(t) in ('Atticus', 'Atticus-real') for t in tokens[:tokens.index('--calendar')])):
         decision(False, 'Use atticus.py --hands or --calendar; native actions and safety overrides are not model tools.')
         return
+    if sys.platform != 'darwin' and not external and not os.environ.get('ATTICUS_AGENT'):
+        return linux_gate(event, inp, cmd)
     q = '' if agent_approved or trusted_read else risky(cmd) or ('Run outside the safe folder?' if inp.get('dangerouslyDisableSandbox') or external and cmd else '')
     if not q or not os.environ.get('ATTICUS_ASK') or not pref('safe', True):
         if os.environ.get('ATTICUS_ASK'): preview_commands(cmd)
@@ -877,6 +879,53 @@ def gate():
         preview_commands(cmd)
         record_external()
     decision(ok, '' if ok else 'The user said no. Do not try another way; say it was not done.')
+
+
+def linux_gate(event, inp, cmd):
+    """Linux main asks: an allowlist, a sandbox for the rest (see atticus_shell/sandbox.py).
+    allow   -> runs as written (helpers, volume/media/notification controls, read-only queries)
+    sandbox -> rewritten to run in bubblewrap: read-only files, secrets hidden, no network, no session
+    outside -> `outside <command>`: the user sees the exact command on an Allow card first
+    deny    -> never. The Read tool is not sandboxed, so secret paths are refused here."""
+    from atticus_shell import sandbox
+    def out(ok, reason='', command=None):
+        print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'allow' if ok else 'deny',
+                          **({'updatedInput': {**inp, 'command': command}} if ok and command is not None else {}),
+                          **({'permissionDecisionReason': reason} if not ok else {})}}))
+    no = 'The user said no. Do not try another way; say it was not done.'
+    tool, safe, ask_dir = event.get('tool_name'), pref('safe', True), os.environ.get('ATTICUS_ASK')
+    if tool == 'Read':
+        if sandbox.secret_path(str(inp.get('file_path', '')), extra=(DIR,)):
+            out(False, 'Atticus does not read keys, passwords, tokens, browser profiles or its own data files.')
+        return
+    if tool != 'Bash' or not cmd.strip():
+        return
+    verdict, detail = sandbox.classify(cmd, (ME,))
+    if verdict == 'deny':
+        return out(False, detail + '. Do not try another way; say it was not done.')
+    if verdict == 'outside':
+        if safe:
+            if not ask_dir: return out(False, 'There is no Allow card here, so this cannot run.')
+            if ask_user({'q': risky(detail) or 'Run this on your computer?', 'cmd': detail[:800]}, 60) != 'y': return out(False, no)
+        if ask_dir: preview_commands(detail)
+        return out(True, command=detail)
+    if verdict == 'allow':
+        # the allowlist is harmless by construction, except opening a script or program
+        launch = any(launches_program(re.sub(r'^(xdg-open)\b', 'open', part.strip())) for part in re.split(r'[;&|\n]', cmd))
+        if launch and safe:
+            if not ask_dir: return out(False, 'There is no Allow card here, so this cannot run.')
+            if ask_user({'q': 'Run a program?', 'cmd': cmd[:800]}, 60) != 'y': return out(False, no)
+        if ask_dir: preview_commands(cmd)
+        return
+    if not safe:   # Full access (Settings): the user turned the sandbox off
+        if ask_dir: preview_commands(cmd)
+        return
+    if not sandbox.available():   # no bubblewrap: every unlisted command asks instead
+        if not ask_dir or ask_user({'q': 'Run this on your computer?', 'cmd': cmd[:800]}, 60) != 'y':
+            return out(False, no if ask_dir else 'bubblewrap is not installed, so unlisted commands cannot run.')
+        return
+    scratch = os.path.join(ask_dir or tempfile.mkdtemp(prefix='atticus-box-'), 'sandbox')
+    return out(True, command=sandbox.wrap(cmd, scratch, extra_hidden=(DIR,)))
 
 
 def question_path(directory):
@@ -1756,6 +1805,14 @@ def installed_apps():
     global _APPS_CACHE
     if _APPS_CACHE[0] and time.monotonic() - _APPS_CACHE[0] < 3600:
         return _APPS_CACHE[1]
+    if sys.platform != 'darwin':   # the XDG desktop entries, by their display name
+        try:
+            from atticus_shell import assistant
+            names = {a['name'] for a in assistant.apps() if a['name'].strip()}
+        except Exception:
+            names = set()
+        _APPS_CACHE = (time.monotonic() if names else time.monotonic() - 3595, names)
+        return names
     fallback = {f[:-4] for d in ('/Applications', '/System/Applications', '/System/Applications/Utilities', '/System/Library/CoreServices', HOME + '/Applications')
                 if os.path.isdir(d) for f in os.listdir(d) if f.endswith('.app')}
     try:
@@ -3511,7 +3568,36 @@ def routine_job_path(identifier):
     return os.path.join(root, f'com.atticus.routine.{identifier}.plist')
 
 
+def routine_units(identifier):
+    """Linux: a routine is a pair of systemd user units, (service path, timer path, timer name)."""
+    root = os.path.join(os.environ.get('XDG_CONFIG_HOME') or os.path.join(HOME, '.config'), 'systemd', 'user')
+    name = f'atticus-routine-{identifier}'
+    return os.path.join(root, name + '.service'), os.path.join(root, name + '.timer'), name + '.timer'
+
+
+def routine_install_linux(row):
+    service, timer, name = routine_units(row['id'])
+    os.makedirs(os.path.dirname(service), exist_ok=True)
+    if row['kind'] == 'interval':
+        when = f"OnActiveSec={row['every']}\nOnUnitActiveSec={row['every']}\nAccuracySec=1s"
+    else:
+        when = f"OnCalendar={'Mon..Fri ' if row['days'] == 'weekdays' else ''}*-*-* {row['at']}:00\nPersistent=true\nAccuracySec=1s"
+    env = ''.join(f'Environment="{k}={v}"\n' for k, v in (('ATTICUS_APP', APP), ('ATTICUS_PYTHON', os.environ.get('ATTICUS_PYTHON', sys.executable)),
+                                                           ('ATTICUS_RESOURCES_DIR', os.path.dirname(ME)), ('PYTHONPATH', os.path.dirname(ME)), ('ATTICUS_DIR', DIR)))
+    Path(service).write_text(f'[Unit]\nDescription=Atticus routine {row["id"]}\n\n[Service]\nType=oneshot\n{env}'
+                             f'ExecStart="{sys.executable}" "{ME}" --routine-fire {row["id"]}\n')
+    Path(timer).write_text(f'[Unit]\nDescription=Atticus routine {row["id"]}\n\n[Timer]\n{when}\n\n[Install]\nWantedBy=timers.target\n')
+    if os.environ.get('ATTICUS_TEST'): return
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
+    if subprocess.run(['systemctl', '--user', 'enable', '--now', name], capture_output=True).returncode:
+        for f in (service, timer):
+            try: os.remove(f)
+            except FileNotFoundError: pass
+        raise OSError('Could not start the routine. Try again.')
+
+
 def routine_install(row):
+    if sys.platform != 'darwin': return routine_install_linux(row)
     path = routine_job_path(row['id']); os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     job = {'Label': f"com.atticus.routine.{row['id']}", 'ProgramArguments': [sys.executable, ME, '--routine-fire', row['id']],
            'ProcessType': 'Background', 'StandardOutPath': '/dev/null', 'StandardErrorPath': '/dev/null'}
@@ -3538,6 +3624,7 @@ def routine_install(row):
 
 def routine_repair():
     """Replace weekday jobs written with the old Tuesday-Saturday values."""
+    if sys.platform != 'darwin': return   # a launchd-plist fix; systemd timers never had it
     for row in routines():
         if row.get('kind') != 'time' or row.get('days') != 'weekdays': continue
         try:
@@ -3591,6 +3678,14 @@ def routine_remove(identifier):
         private_json(os.path.join(DIR, 'routines.json'), kept)
     finally:
         lock.close()
+    if sys.platform != 'darwin':
+        service, timer, name = routine_units(identifier)
+        if not os.environ.get('ATTICUS_TEST'): subprocess.run(['systemctl', '--user', 'disable', '--now', name], capture_output=True)
+        for f in (service, timer):
+            try: os.remove(f)
+            except FileNotFoundError: pass
+        if not os.environ.get('ATTICUS_TEST'): subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
+        return True
     path = routine_job_path(identifier)
     if not os.environ.get('ATTICUS_DIR'):
         subprocess.run(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -3633,6 +3728,11 @@ def routine_fire(identifier, now=None):
             fcntl.flock(f, fcntl.LOCK_EX); f.write(json.dumps({'id': identifier}) + '\n')
     finally:
         lock.close()
+    if sys.platform != 'darwin':   # tell the running shell there is a routine to run; it pops the queue and asks it aloud
+        if not os.environ.get('ATTICUS_TEST'):
+            try: subprocess.run([APP, 'control', 'routine'], capture_output=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired): pass
+        return True
     if not os.environ.get('ATTICUS_DIR'):
         wake = subprocess.run(['/bin/launchctl', 'kickstart', f'gui/{os.getuid()}/com.atticus.app'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if wake.returncode and subprocess.run(['/usr/bin/pgrep', '-f', APP], stdout=subprocess.DEVNULL).returncode:
@@ -3677,6 +3777,10 @@ BUDGET = {'usd': 0.002, 'secs': 6}   # median of the last 50 AI asks must stay u
 
 
 def notify(text):
+    if sys.platform != 'darwin':
+        try: subprocess.run(['notify-send', '-a', 'Atticus', 'Atticus', str(text)[:2000]], capture_output=True, timeout=5)
+        except (OSError, subprocess.TimeoutExpired): pass
+        return
     osa('on run argv\ndisplay notification (item 1 of argv) with title "Atticus" sound name "Glass"\nend run', text)
 
 
@@ -3708,31 +3812,8 @@ def watch(what, then, app='', words='', mode='', phrase=''):
     notify('Stopped watching after 3 hours.')
 
 
-def licensed():
-    return not GUMROAD_PRODUCT or os.path.exists(KEY_FILE)
-
-
-def activate(key):
-    req = urllib.request.Request('https://api.gumroad.com/v2/licenses/verify',
-                                 urllib.parse.urlencode({'product_id': GUMROAD_PRODUCT, 'license_key': key}).encode())
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            r = json.loads(response.read())
-    except urllib.error.HTTPError as e:   # Gumroad answers a bad key with a 404
-        with e:
-            r = json.loads(e.read() or b'{}')
-    except OSError:
-        return 'Could not reach Gumroad. Check the internet and try again.'
-    p = r.get('purchase') or {}
-    if not r.get('success') or p.get('refunded') or p.get('chargebacked'):
-        return 'That key did not work. Copy it from your Gumroad receipt and type: key <your key>'
-    os.makedirs(DIR, exist_ok=True)
-    Path(KEY_FILE).write_text(key)
-    return 'Thanks for buying Atticus! It is unlocked.'
-
-
 def telemetry_enabled():
-    return bool(POSTHOG_KEY and pref('stats', True) and not os.environ.get('ATTICUS_DIR'))   # ATTICUS_DIR is the pure-test sandbox
+    return False   # no telemetry in this build
 
 
 def install_id():
@@ -3744,17 +3825,8 @@ def install_id():
 
 
 def posthog(event, props=None, stamp=()):
-    """One anonymous event (a random ID, no person profile). stamp: (text, file) written once it is sent."""
-    if not telemetry_enabled():
-        return
-    try:
-        body = json.dumps({'api_key': POSTHOG_KEY, 'event': event, 'distinct_id': install_id(), 'properties': {'$process_person_profile': False, 'version': APP_VERSION, 'commit': APP_COMMIT,
-                                                                                                            'macos': platform.mac_ver()[0], 'client': client(), **(props or {})}})
-        subprocess.Popen(['/bin/sh', '-c', 'curl -fsS -m 10 -H "Content-Type: application/json" -d "$1" https://us.i.posthog.com/i/v0/e/' + (' && printf %s "$2" > "$3"' if stamp else ''),
-                          'atticus-ping', body, *stamp],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)   # cancellation cannot kill it or slow the answer
-    except (OSError, ValueError):
-        pass   # telemetry never breaks an ask
+    """Telemetry is removed from this build: nothing is sent anywhere."""
+    return None
 
 
 def ping():
@@ -4022,10 +4094,6 @@ TIPS = ['Say "remember …" and Atticus keeps it as a rule.',
         'Ask "where do I click to …" and a ring marks the spot.',
         'Tap the shortcut to type instead of talk.',
         'Sonnet gives better answers on hard tasks. Settings → Intelligence → Balanced uses it for real work.']
-SUPPORT = ['Enjoying Atticus? Leave a tip →',
-           'Atticus is free. A small tip keeps it that way →',
-           'Made by one person. A tip helps a lot →',
-           'Did that save you a minute? Tip the developer →']
 MISS = 'Saying the same thing more than once? Tell Atticus how you want it done. It remembers next time.'
 MODEL_OFFER = '\nModel: reply ONLY [sonnet] before tools for hard multi-step reasoning or research. Else finish; retry a failed tool once another way. Stopping short of a reachable goal: end [sonnet], never offer to continue.'
 
@@ -4079,24 +4147,17 @@ def message_blocks(event):
 
 def tip(reply, taught=''):
     """One small tip under the answer ("i <tip>"). After a miss or a redo: how to teach it (the AI's own words if it gave some),
-    every time; otherwise a general tip at most every 6 h. Off in Settings. The tip-jar line ("Support: …") has its own
-    switch and clock: at most every 4 h, never after a miss."""
+    every time; otherwise a general tip at most every 6 h. Off in Settings."""
     if os.environ.get('ATTICUS_UI') != '1':
         return
     tips, miss = pref('tips', True), taught or failed_action_reply(reply, getattr(run, 'work', False))
     if taught.startswith('Learned:') or tips and miss:
         return say('i', taught or MISS)
-    stamp, kofi = os.path.join(DIR, 'tip'), os.path.join(DIR, 'kofi')
+    stamp = os.path.join(DIR, 'tip')
     if miss:
         return
-    if not os.path.exists(kofi):   # first ask, or an install from before the tip jar: its 4 h clock starts now
-        Path(kofi).touch()
     if not os.path.exists(stamp):   # never on the very first ask
         return Path(stamp).write_text('0')
-    if pref('support', pref('tips', True)) and time.time() - os.path.getmtime(kofi) > 4 * 3600:
-        Path(kofi).touch()
-        posthog('support', {'action': 'shown', 'from': 'overlay'})
-        return say('i', 'Support: ' + SUPPORT[int(time.time()) % len(SUPPORT)])
     n = int(Path(stamp).read_text() or 0)
     if not tips or time.time() - os.path.getmtime(stamp) < 6 * 3600:
         return
@@ -5604,16 +5665,45 @@ def agents_service():
     finally: manager.close()
 
 
+LINUX_TOOLS = f"""- Timers, alarms, reminders (they ring, notify and speak by themselves; never use sleep, at, cron or notify-send for these): {shlex.quote(ME)} --timer <10m|1h30m|45s> ["label"] | --alarm HH:MM [today|tomorrow|YYYY-MM-DD|daily|weekdays] ["label"] | --remind "<YYYY-MM-DD HH:MM>"|+<duration> [daily|weekdays] "<what>" | --alarms | --alarms cancel <id|all|timer|alarm|reminder>. Times are local, 24-hour; work out the date from Context's Now. No time given for a reminder: ask when.
+- Sound, music, screen: {shlex.quote(ME)} --volume [N|+N|-N|mute|unmute] | --media play|pause|toggle|next|previous|stop|status | --brightness [N|+N|-N] | --notify "<text>". Other players/devices: playerctl, wpctl, nmcli, bluetoothctl.
+- Lists (shopping, to-do, any name): {shlex.quote(ME)} --list | --list "<name>" | --list "<name>" add "<item>" ["<item>"…] | remove "<item>" | clear.
+- Smart home (Home Assistant; lights, plugs, climate, covers, locks, scenes): {shlex.quote(ME)} --home list [domain] | state "<name>" | on|off|toggle "<name>" | set "<name>" brightness|temperature|volume|position <n>. It says so when no server is configured; relay that.
+- Apps: open -a "<name>" launches an installed app; {shlex.quote(ME)} --apps lists their names.
+- Shell: the helpers above and plain desktop queries run normally. Every other command runs in a read-only sandbox with no network and no access to the desktop, keys or passwords: fine for reading files and computing, and it cannot change anything. A command that must really change files or the system: prefix it with `outside ` (e.g. outside mv "a" "b"); the user sees it on an Allow card, so use it only for what was asked. Web content: {SEARCH} / {READ} / WebFetch, never curl. Deleting, sudo, power-off and git push never run.
+"""
+
+
 def system_prompt(risky):
     """The Atticus system prompt: the shared helpers and reply protocol, plus this client's risky-action rule."""
     system = SYSTEM.replace('NEVER_RISKY', risky)
+    if sys.platform != 'darwin':
+        # The shared prompt is written for macOS. Say what is true here, so the model does not spend steps
+        # on AppleScript, `defaults` or a Calendar helper that do not exist on this desktop.
+        swaps = (('You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.',
+                  'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked.'),
+                 ("- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.\n",
+                  '- This is not a Mac: no AppleScript, osascript, defaults, launchctl or System Settings. Use the tools listed here.\n'),
+                 (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',
+                  ' There is no calendar helper on this system: use --remind for things to be reminded of, and say so if a real calendar event was asked for.'),
+                 (f'- Spotify: {PLAY} "<name>" plays; {QUEUE} "<track>" queues.\n', LINUX_TOOLS),
+                 ('Open Atticus Settings: open -a Atticus. ', 'Atticus settings live in ~/.config/atticus/settings.json. '),
+                 ('- App/site: always try; never blame sandbox/Terminal. Name the denied Settings switch.\n', '- App/site: always try.\n'))
+        for old, new in swaps:
+            if old not in system: raise RuntimeError('Linux prompt swap no longer matches the shared prompt: ' + old[:50])
+            system = system.replace(old, new)
+        if LINUX_TOOLS not in system: raise RuntimeError('Linux tools missing from the prompt')
+        linux = True
+    else:
+        linux = False
     if pref('workIn', 'back') == 'front':
         system = system.replace('Work behind: never activate/raise unless asked to open/show/switch/focus.', 'Work in front: bring apps/pages forward only when not frontmost.').replace('pictures that window in place, even covered; raises only if asked.', 'to bring the working app forward.')
-    if client() == 'claude' and not server():
+    if client() == 'claude' and not server() and not linux:   # background agents are not wired into the Linux shell
         head, _, rest = system.partition('\n')
         system = head + '\n' + AGENT_HANDOFF + rest
+    # screen drawing and the pointer are drawn by the macOS shell; the Linux overlay has neither
     return (system + (ASK_ME if pref('askMe', True) else '') +
-            (DRAWING if pref('draw', True) else '') + (POINTER if pref('pointer', False) and not pref('draw', True) else '') + (LEARN_ME if pref('learnMe', True) else '') +
+            (DRAWING if pref('draw', True) and not linux else '') + (POINTER if pref('pointer', False) and not pref('draw', True) and not linux else '') + (LEARN_ME if pref('learnMe', True) else '') +
             (TEACH if pref('tips', True) else '') + (WORKFLOW if pref('learn', True) else ''))
 
 
@@ -7788,6 +7878,8 @@ def main():
         return posthog('support', {'action': 'clicked', 'from': args[2] if args[2] in ('overlay', 'setup', 'settings', 'menu') else 'other'})
     if len(args) == 4 and args[:2] == ['--telemetry', 'idea'] and args[2] in ('shown', 'clicked') and args[3].isdigit():   # "Ideas when I'm away": which one, never its text
         return posthog('idea', {'action': args[2], 'index': int(args[3])})
+    if sys.platform != 'darwin' and args[:1] and args[0] in LINUX_NATIVE:   # timers, alarms, reminders, media, volume…: the native helper does them
+        return sys.exit(subprocess.run([APP, *args]).returncode)
     if args == ['--draw', '--help']:
         return print(DRAW_HELP if pref('draw', True) else 'Screen drawings are off')
     if args[:1] == ['--draw']:
@@ -7804,7 +7896,7 @@ def main():
     if args == ['--routine-pop']:
         return print(json.dumps(routine_pop()))
     if args[:1] == ['--agent-notify']:
-        return osa('on run argv\ndisplay notification (item 1 of argv) with title "Atticus"\nend run', ' '.join(args[1:])[:2000])
+        return notify(' '.join(args[1:])[:2000])
     if args == ['--agents']:
         return agents_service()
     if args == ['--feedback']:
@@ -7851,7 +7943,7 @@ def main():
     if args[:1] == ['--watch'] and (len(args) in (5, 6) and args[3] in ('gone', 'shows', 'settled') or len(args) in (3, 4) and args[1] == 'cmd'):
         os.makedirs(WATCHING, exist_ok=True)   # the watcher runs on after this ask ends
         # This ask's ATTICUS_* vars would make the follow-up request a refused nested ask; keep only install-wide ones.
-        env = {k: v for k, v in os.environ.items() if not k.startswith('ATTICUS_') or k in ('ATTICUS_DIR', 'ATTICUS_APP', 'ATTICUS_CLAUDE', 'ATTICUS_POSTHOG_KEY')}
+        env = {k: v for k, v in os.environ.items() if not k.startswith('ATTICUS_') or k in ('ATTICUS_DIR', 'ATTICUS_APP', 'ATTICUS_CLAUDE')}
         w = subprocess.Popen([sys.executable, ME, '--watching', *args[1:]], start_new_session=True, env=env,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         Path(WATCHING, str(w.pid)).write_text(' '.join(args[1:]))
@@ -7992,7 +8084,7 @@ def main():
         begin_turn(' '.join(args[1:]))
         ping()
         allow_focus(' '.join(args[1:]))
-        r = licensed() and fast(' '.join(args[1:]))
+        r = fast(' '.join(args[1:]))
         if not r:
             checkpoint(status='not_handled')
             sys.exit(1)
@@ -8148,16 +8240,6 @@ def main():
         say('!', 'feedback')
         return say('✓', 'Review your feedback before opening GitHub.')
     ping()
-    key = re.fullmatch(r'\W*(?:my )?(?:license )?key\W+([\w-]{8,})\W*', task, re.I)
-    if key or not licensed():
-        if not wait_commit():
-            return
-        if warm:
-            stop_claude(warm)
-        if key:
-            return say('✓', activate(key[1]))
-        subprocess.run(['open', BUY])
-        return say('✓', f'Atticus is $5, once. Buy a key on the page that just opened, then type: key <your key>')
     os.environ['ATTICUS_RELAY_OWNER'] = str(os.getpid())
     save_request(os.environ['ATTICUS_ASK'], task)
     if warm: warm.relaying = True
@@ -8360,12 +8442,8 @@ def main():
     # "When I say focus mode, …" saved: a green Learned pill
     said = shortcut or learned_say   # a new shortcut, named or learned from these words
     tip(reply, f'Learned: Say “{said}” any time.' if said else 'Learned: Procedure saved for next time.' if workflow else taught[1].strip() if taught else '')
-    asked = os.path.join(DIR, 'improve-asked')   # people who updated never saw setup's question: ask once a day after a task that worked, until they answer
-    if run.ok and not failed and POSTHOG_KEY and not pref('improveAsked', False) and os.environ.get('ATTICUS_UI') == '1' \
-            and not (os.path.exists(asked) and Path(asked).read_text() == time.strftime('%Y-%m-%d')):
-        Path(asked).write_text(time.strftime('%Y-%m-%d')); say('!', 'improve')
     if os.environ.get('ATTICUS_UI') != '1':   # typed from the menu bar: no overlay, so a notification
-        osa('on run argv\ndisplay notification (item 1 of argv) with title "Atticus"\nend run', reply)
+        notify(reply)
 
 
 def run_main():

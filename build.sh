@@ -23,12 +23,20 @@ pkg_for() { case "$1" in
   rg) echo "ripgrep";;
   ydotool) echo "ydotool";;
   playerctl) echo "playerctl";;
+  bwrap) echo "bubblewrap";;
+  wtype) echo "wtype";;
+  notify-send) echo "libnotify";;
+  wpctl) echo "wireplumber";;
+  brightnessctl) echo "brightnessctl";;
   *) echo "$1";;
 esac; }
 # fd/rg back the file-search tool; ydotool/playerctl back native click/type
 # and media control — all optional in the sense that Atticus still runs and
 # talks without them, just with those specific abilities missing.
-for t in grim slurp wl-copy tesseract ffmpeg fd rg ydotool playerctl; do
+# bwrap is the sandbox every unlisted shell command runs in; without it each
+# of those asks for an Allow card instead. wtype types text with the real
+# keyboard layout; notify-send/wpctl/brightnessctl back alarms and controls.
+for t in grim slurp wl-copy tesseract ffmpeg fd rg ydotool playerctl bwrap wtype notify-send wpctl brightnessctl; do
   command -v "$t" >/dev/null || need_sys+=("$(pkg_for "$t")")
 done
 python3 -c 'import gi; gi.require_version("WebKit","6.0"); gi.require_version("Gtk4LayerShell","1.0")' 2>/dev/null \
@@ -47,6 +55,10 @@ if [ ! -d "$VENV" ]; then
 fi
 "$VENV/bin/pip" install -q --upgrade pip
 "$VENV/bin/pip" install -q --only-binary=:all: faster-whisper numpy
+# Wake-word runtime (a trained models/<word>.onnx is still needed to use it; without
+# one, or if this cannot install, the speech-to-text fallback spots the word instead).
+"$VENV/bin/pip" install -q --only-binary=:all: onnxruntime livekit-wakeword 2>/dev/null \
+  || echo "Note: livekit-wakeword not installed; the wake word will use the slower speech-to-text fallback."
 # Neural text-to-speech (natural voice). If it or the voice cannot be fetched,
 # the app falls back to espeak-ng, so this is best-effort and never fatal.
 "$VENV/bin/pip" install -q piper-tts 2>/dev/null || echo "Note: piper-tts not installed; espeak-ng voice will be used."

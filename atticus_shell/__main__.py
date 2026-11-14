@@ -130,6 +130,11 @@ def main():
                 on_done=self._on_done,
                 on_prompt=self._on_prompt)
             self.transcriber.warm()
+            self.speaker.warm()
+            self._last_answer = ""
+            # Timers/alarms/reminders live in systemd transient timers, which a
+            # reboot wipes: re-arm what is still ahead and fire what was missed.
+            threading.Thread(target=self._rearm_alarms, daemon=True).start()
 
             # Wake word ("Atticus"), like Alexa — always listening, off by default.
             self.wake = None
@@ -149,6 +154,77 @@ def main():
             # Hold the app alive without a visible window until the hotkey fires.
             self._hold = Gio.Application.hold(app)
             self.overlay.window.set_visible(False)
+
+        def _rearm_alarms(self):
+            try:
+                from . import assistant
+                time.sleep(3)   # let the overlay and the control socket come up first
+                assistant.rearm_all()
+            except Exception:
+                import traceback
+                traceback.print_exc()
+
+        def _pop_routines(self):
+            # A scheduled routine is due ("every weekday at 8, tell me the
+            # news"): the brain queued it; take the queue and ask each one as
+            # if the user had just said it, so the answer is shown and spoken.
+            import json as _json
+            from .bridge import ATTICUS_PY, _brain_env
+            try:
+                env = _brain_env()
+                ids = _json.loads(subprocess.run([sys.executable, str(ATTICUS_PY), "--routine-pop"], env=env,
+                                                 capture_output=True, text=True, timeout=20).stdout or "[]")
+                from pathlib import Path
+                rows = _json.loads((Path(env["ATTICUS_DIR"]) / "routines.json").read_text())
+                asks = [r["ask"] for i in ids for r in rows if isinstance(r, dict) and r.get("id") == i and r.get("ask")]
+            except Exception:
+                import traceback
+                traceback.print_exc()
+                return
+            for ask in asks:
+                GLib.idle_add(self._run_routine, ask, 0)
+
+        def _run_routine(self, ask, tries):
+            # Never talk over the user: wait for a conversation to end (up to ~10 min).
+            busy = self.listening or self.bridge.running() or self._speaking or self._prompt
+            if busy and tries < 40:
+                GLib.timeout_add_seconds(15, lambda: (self._run_routine(ask, tries + 1), False)[1])
+                return False
+            if not busy:
+                self.earcons.play("start")
+                self._submit_typed(ask)
+            return False
+
+        def _on_alarm(self, arg):
+            # A timer, alarm or reminder just went off (assistant.fire, run by
+            # its systemd timer). Chime always; show and say it unless the
+            # user is mid-conversation, where it must not cut them off.
+            try:
+                import json as _json
+                data = _json.loads(arg)
+                text, lang = str(data.get("text", "")), str(data.get("lang", "pt"))
+            except (ValueError, AttributeError):
+                return
+            if not text:
+                return
+            self.earcons.play("alarm")
+            if self.listening or self.bridge.running() or self._prompt:
+                return   # the notification is already on screen
+            was_hidden = not self.overlay.window.get_visible()
+            self._cancel_autohide()
+            self.overlay.present()
+            if was_hidden:
+                self.overlay.call("reset")
+            self.overlay.call("listen", True)
+            self.overlay.call("words", "⏰")
+            self.overlay.call("line", "✓ " + text)
+            if self.wake:
+                self.wake.pause()   # its own voice must not wake it
+            self._speaking = True
+            self._speak_gen = self._gen
+            self._last_answer = ""
+            # after the chime (about 1.9 s), not on top of it
+            GLib.timeout_add(1900, lambda: (self.speaker.speak(text, lang, done=self._on_speech_done), False)[1])
 
         def _fix_mic_gain(self):
             # On PipeWire the mic level is the SOURCE node volume (pactl), not the
@@ -187,6 +263,10 @@ def main():
                 self._cancel()
             elif cmd == "ask" and arg:
                 self._submit_typed(arg)
+            elif cmd == "alarm" and arg:
+                self._on_alarm(arg)
+            elif cmd == "routine":
+                threading.Thread(target=self._pop_routines, daemon=True).start()
             elif cmd == "ping":
                 pass
             elif cmd == "hide-for-capture":
@@ -357,6 +437,7 @@ def main():
             # voice.
             self._speaking = True
             self._speak_gen = self._gen   # tag this playback to the current turn
+            self._last_answer = text
             self.speaker.speak(text, self.transcriber.last_language,
                                done=self._on_speech_done)
 
@@ -373,6 +454,14 @@ def main():
                 # (it would otherwise re-arm auto-hide on top of a new turn).
                 return False
             if not self.bridge.running():
+                # Conversation mode: when Atticus ends on a question, open the
+                # mic for the reply instead of making the user say the wake
+                # word again. Trailing silence closes it, as after the keyword.
+                asked = self._last_answer.rstrip().rstrip("*_`)\"” ").endswith("?")
+                self._last_answer = ""
+                if asked and cfg.get("followUp", True) and not self.listening:
+                    self._begin_listen(wake=True)
+                    return False
                 self._resume_wake()
                 self._schedule_autohide()
             return False
@@ -418,6 +507,50 @@ def main():
 
         def _start_brain(self, text):
             self.overlay.present()
+            # Everyday commands (timer, volume, next song, open an app…) are
+            # recognized and run right here, with no AI round trip. Anything
+            # the parser is not sure about falls through to the model.
+            intent = None
+            if cfg.get("instant", True):
+                try:
+                    from . import intents
+                    intent = intents.parse(text)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+            if intent is None:
+                return self._ask_brain(text)
+            gen = self._gen
+
+            def work():
+                try:
+                    reply = intents.run(intent)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
+                    reply = None
+                GLib.idle_add(self._instant_done, text, intent, reply, gen)
+            threading.Thread(target=work, daemon=True).start()
+
+        def _instant_done(self, text, intent, reply, gen):
+            if gen != self._gen:
+                return False   # cancelled or superseded while it ran
+            if reply is None:
+                self._ask_brain(text)   # could not do it locally after all
+                return False
+            if not reply:           # "stop": nothing to say, just go quiet
+                self.speaker.stop()
+                self.overlay.hide()
+                self._resume_wake()
+                return False
+            self.overlay.call("line", "✓ " + reply)
+            self._speaking = True
+            self._speak_gen = self._gen
+            self._last_answer = ""
+            self.speaker.speak(reply, intent.lang, done=self._on_speech_done)
+            return False
+
+        def _ask_brain(self, text):
             front = self._front_app()
             self.bridge.ask(text, front_app=front)
 
@@ -459,19 +592,23 @@ def main():
             self.speaker.speak(text, lang, done=after)
 
         def _prompt_speech(self, p, first):
+            en = str(self.transcriber.last_language or cfg.get("asrLanguage", "")).lower().startswith("en")
             if p["kind"] == "perm":
                 base = (p.get("q") or "").strip()
-                tail = ("Tento de novo? Diga sim ou não."
-                        if p.get("retry") else "Posso? Diga sim ou não.")
+                if en:
+                    tail = ("Try again? Say yes or no." if p.get("retry") else "May I? Say yes or no.")
+                else:
+                    tail = ("Tento de novo? Diga sim ou não."
+                            if p.get("retry") else "Posso? Diga sim ou não.")
                 return (base + (". " if base else "") + tail) if first else tail
             q = (p.get("q") or "").strip()
             opts = p.get("options") or []
             spoken_opts = "; ".join(
-                f"opção {i + 1}: {self._plain(o)}" for i, o in enumerate(opts[:6]))
-            tail = "Diga o número, ou toque na opção."
+                f"{'option' if en else 'opção'} {i + 1}: {self._plain(o)}" for i, o in enumerate(opts[:6]))
+            tail = "Say the number, or tap the option." if en else "Diga o número, ou toque na opção."
             if first:
                 return "; ".join(x for x in (q, spoken_opts, tail) if x)
-            return "Diga o número da opção, ou toque."
+            return "Say the option number, or tap it." if en else "Diga o número da opção, ou toque."
 
         @staticmethod
         def _plain(text):
@@ -542,71 +679,9 @@ def main():
             self._prompt = None
             return False
 
-        # Portuguese/English function words, excluded from the fuzzy choice
-        # match below so a reply and an option label never "match" on nothing
-        # but an article or preposition they both happen to contain.
-        _STOPWORDS = {
-            "a", "o", "os", "as", "de", "da", "do", "das", "dos", "e", "é",
-            "um", "uma", "uns", "umas", "no", "na", "nos", "nas", "por",
-            "para", "com", "que", "se", "ao", "aos", "à", "às", "em", "ou",
-            "mas", "the", "a", "of", "to", "is", "it", "and", "or", "in",
-        }
-
         def _match_answer(self, p, text):
-            # Map a spoken reply to a card answer, or None when it is unclear.
-            import re
-            t = re.sub(r"[.!?,;:]+", " ", text.lower())
-            t = re.sub(r"\s+", " ", t).strip()
-            if not t:
-                return None
-            yes = {"sim", "pode", "pode sim", "claro", "ok", "okay", "isso",
-                   "permitir", "permito", "aprovar", "manda", "vai", "yes", "allow"}
-            no = {"nao", "não", "cancelar", "cancela", "negar", "nega", "para",
-                  "pare", "no", "deny", "nunca"}
-            none = {"nenhum", "nenhuma", "nenhum deles", "nenhuma delas",
-                    "outra", "outra coisa", "none", "nada disso"}
-            words = set(t.split())
-            if p["kind"] == "perm":
-                # Check "no" first: a negative reply ("não pode", "claro que
-                # não", "ok, não") contains a yes-word too, and must not be
-                # read as approval just because "pode"/"claro"/"ok" also
-                # matched.
-                if words & no or t in no:
-                    return "n"
-                if words & yes or t in yes:
-                    return "r" if p.get("retry") else "y"
-                return None
-            # choice card
-            if t in none or words & none:
-                return ""
-            ordinals = {"primeiro": 0, "primeira": 0, "um": 0, "uma": 0,
-                        "segundo": 1, "segunda": 1, "dois": 1, "duas": 1,
-                        "terceiro": 2, "terceira": 2, "tres": 2, "três": 2,
-                        "quarto": 3, "quarta": 3, "quatro": 3,
-                        "quinto": 4, "quinta": 4, "cinco": 4,
-                        "sexto": 5, "sexta": 5, "seis": 5}
-            opts = p.get("options") or []
-            m = re.search(r"\b(\d+)\b", t)
-            if m:
-                i = int(m.group(1)) - 1
-                if 0 <= i < len(opts):
-                    return str(i)
-            for w in words:
-                if w in ordinals and ordinals[w] < len(opts):
-                    return str(ordinals[w])
-            # Fuzzy: the option whose label shares the most content words
-            # (stopwords excluded) with the reply.
-            content = words - self._STOPWORDS
-            best, best_score = None, 0
-            for i, o in enumerate(opts):
-                label = set(re.sub(r"[^\w\s]", " ", self._plain(o).lower()).split())
-                label -= self._STOPWORDS
-                score = len(label & content)
-                if score > best_score:
-                    best, best_score = i, score
-            if best is not None and best_score >= 1:
-                return str(best)
-            return None
+            from . import answers
+            return answers.match(p, text, self.transcriber.last_language or cfg.get("asrLanguage", ""))
 
         # --- overlay page -> shell ----------------------------------------
         def _on_message(self, body):

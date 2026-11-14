@@ -1,7 +1,7 @@
 """Run the brain (atticus.py) and stream its tagged output into the overlay.
 
-The macOS shell parsed atticus.py's stdout line protocol and drove the WKWebView.
-This does the same for the GTK/WebKit overlay. The line tags (from atticus.py's
+The brain speaks a line protocol on stdout; this parses it and drives the
+GTK/WebKit overlay. The line tags (from atticus.py's
 say()/print()):
     "· note"   live status
     "▸ step"   a step row
@@ -41,7 +41,7 @@ def _brain_env() -> dict:
     env.setdefault("ATTICUS_DIR", str(Path.home() / ".config/atticus"))
     # Tell the brain an overlay is listening on stdout, so relay() emits the
     # choice ("◇"), permission ("?") and setting ("⚙") cards to us instead of
-    # the macOS-only AppleScript dialogs (which are no-ops on Linux, so a pick
+    # a dialog path that does not exist on this desktop (so a pick
     # would silently resolve to "none" and the brain would wrongly report that
     # the user did not choose). Background-agent hand-off is not wired in this
     # shell, so force main-window delivery to keep the model from moving a task
@@ -198,7 +198,7 @@ class Bridge:
             elif tag == "⚙":
                 # "⚙ <key> <value>": a spoken settings change, already validated
                 # by the brain (never a server address, key, client, or Safe mode
-                # off). Persist it so it survives, like the macOS app flipping it.
+                # off). Persist it so it survives a restart.
                 parts = rest.split(" ", 1)
                 key = parts[0]
                 raw = parts[1] if len(parts) > 1 else ""

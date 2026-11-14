@@ -1,7 +1,6 @@
 """Platform detection and backend selection.
 
-The macOS shell (Atticus.swift) assumed one platform. On Linux the desktop is
-not one thing, so every OS-specific capability goes through a backend chosen
+The Linux desktop is not one thing, so every OS-specific capability goes through a backend chosen
 here. v1 targets Omarchy (Hyprland on Wayland); the seams below are where
 GNOME / X11 support slots in later.
 """

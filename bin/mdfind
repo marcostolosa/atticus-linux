@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""macOS `mdfind` (Spotlight search) compatibility shim for Linux.
+"""File search for the brain, which calls it as `mdfind` (fd + ripgrep underneath).
 
 The brain (atticus.py) searches files with:
     mdfind -name "<words>"              filename search (default root: $HOME)

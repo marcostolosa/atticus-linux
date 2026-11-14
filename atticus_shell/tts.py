@@ -1,4 +1,4 @@
-"""Text-to-speech — the Linux replacement for macOS `say`.
+"""Text-to-speech, fully local.
 
 Two engines, chosen automatically:
 
@@ -88,7 +88,12 @@ class Speaker:
         self._model = _piper_model()
         self._rate = 22050
         self._player = _player_cmd(self._rate)
-        if self._piper and self._model and self._player:
+        try:
+            import piper as _piper_api  # noqa: F401
+            has_api = True
+        except Exception:
+            has_api = False
+        if (self._piper or has_api) and self._model and self._player:
             try:
                 cfg = json.loads(Path(self._model + ".json").read_text())
                 self._rate = int(cfg.get("audio", {}).get("sample_rate", 22050))
@@ -103,6 +108,9 @@ class Speaker:
                         else ("espeak" if shutil.which("espeak") else None))
         self._procs: list[subprocess.Popen] = []
         self._lock = threading.Lock()
+        self._voice = None
+        self._voice_failed = False
+        self._voice_lock = threading.Lock()
 
     @property
     def engine(self) -> str:
@@ -112,7 +120,7 @@ class Speaker:
         return self._engine is not None
 
     def _enabled(self) -> bool:
-        return bool(_setting("speak", True))   # default on, like the Mac read-aloud
+        return bool(_setting("speak", True))   # default on
 
     def _espeak_voice(self, override: Optional[str] = None) -> str:
         if override and override.lower() in _VOICE:
@@ -160,7 +168,57 @@ class Speaker:
                     pass
             threading.Thread(target=_watch, daemon=True).start()
 
+    def _load_voice(self):
+        """Load the piper voice once, in-process. Starting the piper CLI for
+        every answer re-imports onnxruntime and reloads the model each time:
+        measured 2.5 s before the first sample, against 0.1 s with the voice
+        kept warm. Returns None if the Python API is unavailable, and the
+        caller falls back to the CLI."""
+        with self._voice_lock:
+            if self._voice is None and not self._voice_failed:
+                try:
+                    from piper import PiperVoice
+                    self._voice = PiperVoice.load(self._model)
+                except Exception:
+                    self._voice_failed = True
+            return self._voice
+
+    def warm(self):
+        if self._engine == "piper":
+            threading.Thread(target=self._load_voice, daemon=True).start()
+
     def _speak_piper(self, words: str):
+        voice = self._load_voice()
+        if voice is None:
+            return self._speak_piper_cli(words)
+        with self._lock:
+            try:
+                play = subprocess.Popen(
+                    self._player, stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                self._procs = []
+                return
+            self._procs = [play]
+
+        # Synthesize sentence by sentence straight into the player, so the
+        # first words are heard while the rest is still being generated.
+        def feed():
+            try:
+                for chunk in voice.synthesize(words):
+                    if play.poll() is not None:   # stop() ended playback
+                        break
+                    play.stdin.write(chunk.audio_int16_bytes)
+            except Exception:
+                pass
+            finally:
+                try:
+                    play.stdin.close()
+                except Exception:
+                    pass
+        threading.Thread(target=feed, daemon=True).start()
+
+    def _speak_piper_cli(self, words: str):
         with self._lock:
             try:
                 synth = subprocess.Popen(

@@ -25,6 +25,8 @@ _SPECS = {
     "start": [(660, 0.085), (990, 0.11)],    # rising two-note: "listening"
     "end":   [(880, 0.075), (620, 0.10)],    # falling two-note: "got it"
     "cancel": [(520, 0.10)],                  # single low blip: dismissed
+    # a timer or alarm going off: three bright double-beeps, hard to miss
+    "alarm": [(1175, 0.12), (0, 0.07), (1568, 0.16), (0, 0.28)] * 3,
 }
 
 
@@ -36,6 +38,9 @@ def _render(segments) -> np.ndarray:
         if isinstance(freq, (tuple, list)):
             f = np.linspace(freq[0], freq[1], n)
             wave_ = np.sin(2 * np.pi * np.cumsum(f) / RATE)
+        elif not freq:
+            parts.append(np.zeros(n))   # a rest
+            continue
         else:
             wave_ = np.sin(2 * np.pi * freq * t)
         env = np.ones(n)

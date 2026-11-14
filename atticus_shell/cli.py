@@ -285,10 +285,201 @@ def hands_main(argv: list[str]) -> int:
     return 0 if ok else 1
 
 
+# --- everyday assistant: timers, alarms, reminders, media, volume ------------
+def _parse_span(text: str) -> float | None:
+    """ "90", "90s", "10m", "1h30m", "1h 30m" -> seconds."""
+    text = text.strip().lower()
+    if text.replace(".", "", 1).isdigit():
+        return float(text)
+    import re
+    parts = re.findall(r"(\d+(?:\.\d+)?)\s*(h|m|s)", text)
+    if not parts or re.sub(r"(\d+(?:\.\d+)?)\s*(h|m|s)|\s", "", text):
+        return None
+    return sum(float(n) * {"h": 3600, "m": 60, "s": 1}[u] for n, u in parts)
+
+
+def _row_line(r: dict) -> str:
+    import time
+    when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["at"]))
+    left = max(0, int(r["at"] - time.time()))
+    rep = f" repeats {r['repeat']}" if r.get("repeat") else ""
+    return f"{r['id']} {r['kind']} at {when} (in {left // 3600}h{left % 3600 // 60:02d}m{left % 60:02d}s){rep} {r.get('label', '')}".rstrip()
+
+
+def _lang() -> str:
+    from . import settings
+    lang = str(settings.get("asrLanguage", "auto")).lower()
+    if lang.startswith("en"):
+        return "en"
+    if lang.startswith("pt"):
+        return "pt"
+    return "pt" if (os.environ.get("LANG") or "").lower().startswith("pt") else "en"
+
+
+def assistant_main(cmd: str, rest: list[str]) -> int:
+    """The model-facing side of atticus_shell/assistant.py. Replies are short
+    English facts for the model to phrase; errors exit 1 with the reason."""
+    import time
+    from . import assistant as A
+    if cmd == "--alarm-fire":
+        return 0 if rest and A.fire(rest[0]) else 1
+    if cmd == "--timer":
+        secs = _parse_span(rest[0]) if rest else None
+        if not secs or secs > 86400:
+            print('usage: --timer <duration> [label]   e.g. --timer 10m "pasta", --timer 1h30m, --timer 45s')
+            return 1
+        row, err = A.add("timer", time.time() + secs, " ".join(rest[1:]), lang=_lang(), seconds=secs)
+        print(f"timer set: {_row_line(row)}" if row else f"not set: {err}")
+        return 0 if row else 1
+    if cmd == "--alarm":
+        import re
+        m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", rest[0]) if rest else None
+        if not m:
+            print('usage: --alarm <HH:MM> [today|tomorrow|YYYY-MM-DD|daily|weekdays] [label]   24-hour clock')
+            return 1
+        h, mi = int(m[1]), int(m[2])
+        day, label, repeat = (rest[1].lower() if len(rest) > 1 else ""), rest[2:], ""
+        lt = time.localtime()
+        if day in ("daily", "weekdays"):
+            repeat, base = day, (lt.tm_year, lt.tm_mon, lt.tm_mday)
+        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            base = tuple(int(x) for x in day.split("-"))
+        elif day in ("today", "tomorrow"):
+            base = (lt.tm_year, lt.tm_mon, lt.tm_mday + (day == "tomorrow"))
+        else:
+            label, base = rest[1:], None
+        if base is None:   # no day: the next time the clock shows it
+            at = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, mi, 0, 0, 0, -1))
+            if at <= time.time():
+                at = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday + 1, h, mi, 0, 0, 0, -1))
+        else:
+            at = time.mktime((*base, h, mi, 0, 0, 0, -1))
+        row, err = A.add("alarm", at, " ".join(label), repeat, lang=_lang())
+        print(f"alarm set: {_row_line(row)}" if row else f"not set: {err}")
+        return 0 if row else 1
+    if cmd == "--remind":
+        import re
+        usage = 'usage: --remind "<YYYY-MM-DD HH:MM>" <text> | --remind +<duration> <text> | add daily|weekdays before the text to repeat'
+        if len(rest) < 2:
+            print(usage)
+            return 1
+        when, words, repeat = rest[0], rest[1:], ""
+        if when.startswith("+"):
+            secs = _parse_span(when[1:])
+            if not secs:
+                print(usage)
+                return 1
+            at = time.time() + secs
+        else:
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", when) and words and re.fullmatch(r"\d{1,2}:\d{2}", words[0]):
+                when, words = when + " " + words[0], words[1:]   # date and time passed as two arguments
+            try:
+                at = time.mktime(time.strptime(when.replace("T", " ")[:16], "%Y-%m-%d %H:%M"))
+            except ValueError:
+                print(usage)
+                return 1
+        if words and words[0].lower() in ("daily", "weekdays"):
+            repeat, words = words[0].lower(), words[1:]
+        if not words:
+            print(usage)
+            return 1
+        row, err = A.add("reminder", at, " ".join(words), repeat, lang=_lang())
+        print(f"reminder set: {_row_line(row)}" if row else f"not set: {err}")
+        return 0 if row else 1
+    if cmd == "--alarms":
+        if rest[:1] == ["cancel"]:
+            gone = A.cancel(" ".join(rest[1:]))
+            print("\n".join("cancelled: " + _row_line(r) for r in gone) or "nothing matched; run --alarms to list them")
+            return 0 if gone else 1
+        rows = A.alarms()
+        print("\n".join(_row_line(r) for r in rows) or "no timers, alarms or reminders are set")
+        return 0
+    if cmd == "--media":
+        action = rest[0] if rest else "status"
+        if action != "status":
+            ok, err = A.media(action)
+            if not ok:
+                print(err)
+                return 1
+            time.sleep(0.3)   # the player reports its new state a moment later
+        p = A.now_playing()
+        print(f"{p['status']}: {p['title']}" + (f" by {p['artist']}" if p["artist"] else "") + f" ({p['player']})"
+              if p else "nothing is playing")
+        return 0
+    if cmd == "--volume":
+        arg = rest[0].lower().rstrip("%") if rest else ""
+        if arg in ("mute", "unmute"):
+            v = A.set_volume(mute=arg == "mute")
+        elif arg[:1] in ("+", "-") and arg[1:].isdigit():
+            v = A.set_volume(delta=int(arg))
+        elif arg.isdigit():
+            v = A.set_volume(percent=int(arg))
+        elif arg:
+            print("usage: --volume [N | +N | -N | mute | unmute]   percent of the default output")
+            return 1
+        else:
+            v = A.volume()
+        print(f"volume {v[0]}%" + (" (muted)" if v[1] else "") if v else "could not reach the audio server (wpctl)")
+        return 0 if v else 1
+    if cmd == "--brightness":
+        arg = rest[0].rstrip("%") if rest else ""
+        if arg[:1] in ("+", "-") and arg[1:].isdigit():
+            b = A.set_brightness(delta=int(arg))
+        elif arg.isdigit():
+            b = A.set_brightness(percent=int(arg))
+        elif arg:
+            print("usage: --brightness [N | +N | -N]   percent")
+            return 1
+        else:
+            b = A.brightness()
+        print(f"brightness {b}%" if b is not None else "no adjustable backlight found (brightnessctl)")
+        return 0 if b is not None else 1
+    if cmd == "--notify":
+        ok = A.notify(" ".join(rest)[:2000]) if rest else False
+        if not ok:
+            print("could not show a notification (notify-send)")
+        return 0 if ok else 1
+    if cmd == "--list":
+        usage = 'usage: --list | --list "<name>" | --list "<name>" add "<item>" ["<item>"…] | remove "<item>" | clear'
+        if not rest:
+            names = A.list_names()
+            print("\n".join(f"{n}: {len(A.list_items(n))} item(s)" for n in names) or "no lists yet")
+            return 0
+        name, verb, items = rest[0], (rest[1] if len(rest) > 1 else "show"), rest[2:]
+        if verb == "show":
+            rows = A.list_items(name)
+            print("\n".join(f"- {r}" for r in rows) or f"the {A.list_key(name)} list is empty")
+        elif verb == "add" and items:
+            added = A.list_add(name, items)
+            print(f"added to {A.list_key(name)}: " + ", ".join(added) if added else "already on the list")
+        elif verb == "remove" and items:
+            gone = A.list_remove(name, " ".join(items))
+            print(f"removed from {A.list_key(name)}: " + ", ".join(gone) if gone else "that is not on the list")
+        elif verb == "clear":
+            print(f"cleared {A.list_clear(name)} item(s) from {A.list_key(name)}")
+        else:
+            print(usage)
+            return 1
+        return 0
+    if cmd == "--home":
+        from . import home
+        return home.main(rest)
+    if cmd == "--apps":
+        print(json.dumps(sorted({a["name"] for a in A.apps()})))
+        return 0
+    return 1
+
+
+ASSISTANT_VERBS = ("--alarm-fire", "--timer", "--alarm", "--remind", "--alarms", "--media", "--volume",
+                   "--brightness", "--notify", "--apps", "--list", "--home")
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         return 2
     cmd = argv[0]
+    if cmd in ASSISTANT_VERBS:
+        return assistant_main(cmd, argv[1:])
     if cmd == "--screens":
         return screens_json()
     if cmd == "--look" and len(argv) >= 3:

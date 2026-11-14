@@ -28,3 +28,6 @@ atticus.sock
 
 # Wake-word probe recordings (voice data, never commit)
 /tools/wake_clips/
+
+# Knowledge-graph output (regenerate with graphify)
+/graphify-out/

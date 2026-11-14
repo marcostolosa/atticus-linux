@@ -68,7 +68,9 @@ def own_words(heard: str, spoken: str) -> str:
     same = sum(b.size for b in match.get_matching_blocks())
     if len(h) >= 3 and same >= 0.75 * len(h) and not (m.size >= 3 and m.a == 0 and len(h) - m.size >= 2):
         return ""
-    if len(h) == 1 and len(s) > 1 and h[0] in s and len(h[0]) > 3:
+    # One word that is in the sentence: its own voice, unless it is a short word
+    # people really say over it ("não", "para"). A number alone is never that.
+    if len(h) == 1 and len(s) > 1 and h[0] in s and (len(h[0]) > 3 or h[0].isdigit()):
         return ""
     if m.size >= 3 and m.a == 0:    # starts with a run of the spoken sentence
         return " ".join(raw[m.size:])

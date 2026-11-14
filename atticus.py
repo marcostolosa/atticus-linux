@@ -1,31 +1,27 @@
 #!/bin/sh
-"exec" "python3" "-c" "import importlib.util as u,os,sys;sys.argv=sys.argv[1:];sys.path[0]=os.path.dirname(os.path.abspath(sys.argv[0]));sys.pycache_prefix=os.path.expanduser('~/Library/Caches/Atticus');s=u.spec_from_file_location('__main__',sys.argv[0]);m=sys.modules['__main__']=u.module_from_spec(s);s.loader.exec_module(m)" "$0" "$@"   # sh: run from cached bytecode (a plain run recompiles this file, ~70 ms per helper call); Python: a no-op string
-"""Atticus: a small Mac helper run by an AI client (Claude Code by default, Devin, or Pi). Idea from Caleb Writes Code's "Atticus".
+"exec" "python3" "-c" "import importlib.util as u,os,sys;sys.argv=sys.argv[1:];sys.path[0]=os.path.dirname(os.path.abspath(sys.argv[0]));sys.pycache_prefix=os.path.expanduser('~/.cache/atticus');s=u.spec_from_file_location('__main__',sys.argv[0]);m=sys.modules['__main__']=u.module_from_spec(s);s.loader.exec_module(m)" "$0" "$@"   # sh: run from cached bytecode (a plain run recompiles this file, ~70 ms per helper call); Python: a no-op string
+"""Atticus's brain: one request in, the answer out, with a Claude model doing the thinking.
 
-Hold Control+Option+Space (Atticus.app) -> talk -> let go. It answers questions (web, files, screen) and does
-tasks on the Mac. Output lines for the overlay: "· note", "▸ step", "✓ answer".
-  atticus.py "what's on my screen?"      run one request (no args = a typed pop-up)
-  atticus.py --place <proc> <left|right|full|fullscreen|center> <laptop|monitor|current> [title]
-  atticus.py --window [app] [--offset N] [--ocr]   paged readable window text
-  atticus.py --draw '<JSON>'             screen drawings and spoken steps; --draw --help for the schema
-  atticus.py --look                       labeled screenshots of every display -> prints the image paths
-  atticus.py --front <app> [tab words]   only when the user asked to see it: bring that app (and that browser tab) forward, then --look
-  atticus.py --show <url|path|app>       open it on the user's other screen and give focus back to what the user was using
-  atticus.py --remember "<line>"  |  --forget "<words>"   the user's saved rules, one line each, sent with every request
-  atticus.py --shortcut "<words>" "<shell command>"  the user's own command: those words then run it instantly, no AI
-  atticus.py --fast "<words>"            run it instantly with no AI if it is a simple command (exit 1 if not)
-  atticus.py --play "<name>"  |  --queue "<song>"   play Spotify or add one track to its queue, focus stays put
-  atticus.py --search <query>  |  --read <url>   free web search (DuckDuckGo) / one page as plain text
-  atticus.py --watch <app> "<title words>" <gone|shows|settled> "<phrase>" ["<request>"]   watch a window in the background, no AI, then notify (and run the request)
-  atticus.py --pick "<question>" <option>...   the user picks one in the box (files get a preview) -> prints it
-  atticus.py --set "<setting name>" on|off   flip one of Atticus's own switches (not safe mode or pause), no clicks
-  atticus.py --unwatch                    stop every watch  |  --budget   is real use still under the cost and speed budget?
-All requests and interrupted steps go to ~/.config/atticus/log.jsonl with their cost (live actions are marked).
+The shell (atticus_shell/) hears the request and starts this file with it; the lines printed here drive the
+box on screen: "· note", "▸ step", "✓ answer" (read aloud), "◇" a choice card, "?" an Allow card.
+
+  atticus.py "que horas são em Lisboa?"    run one request
+  atticus.py --look | --window [app]       a picture of the screen | the text of a window
+  atticus.py --web read <url> | click <n> | fill <n> "<text>"    a website, through the page
+  atticus.py --hands click <x> <y> "<what>" | type | press | scroll | drag    mouse and keyboard
+  atticus.py --show <app|file|url> | --front <app> [title] | --quit <app> | --place <app> <where>
+  atticus.py --play "<name>" [mix] | --queue "<name>"    music by name
+  atticus.py --timer | --alarm | --remind | --list | --home | --volume | --media | --brightness
+  atticus.py --routine add|list|remove     things asked for on a schedule
+  atticus.py --set "<setting name>" on|off flip one of Atticus's own switches (not safe mode or pause), no clicks
+
+The model sees these as its tools (system_prompt), and every shell command it wants to run goes through the
+gate first (atticus_shell/sandbox.py).
 """
 import shlex
 import platform
 import fcntl
-import atexit, base64, difflib, hashlib, html, json, plistlib, shutil, threading, os, re, select, signal, stat, subprocess, sys, tempfile, time, urllib.parse, urllib.request
+import atexit, base64, difflib, hashlib, html, json, shutil, threading, os, re, select, signal, stat, subprocess, sys, tempfile, time, urllib.parse, urllib.request
 import unicodedata
 import uuid
 import traceback
@@ -36,7 +32,7 @@ from pathlib import Path
 
 HOME = os.path.expanduser('~')
 DIR = os.environ.get('ATTICUS_DIR') or os.path.join(HOME, '.config/atticus')   # ATTICUS_DIR: tests keep off the user's chat and rules
-ME = os.path.abspath(__file__)   # inside Atticus.app once built, so the AI's helper commands point here
+ME = os.path.abspath(__file__)   # the model's helper commands point here
 QUIT = shlex.quote(ME) + ' --quit'
 PLACE, LOOK, SEARCH, READ, SHOW, REMEMBER, FORGET, TYPE, PLAY, QUEUE, ABOUT, SHORTCUT, FRONT, WATCH, PICK, SET, WEB, HISTORY, HANDS, WINDOW, ROUTINE = (shlex.quote(ME) + f' --{c}' for c in ('place', 'look', 'search', 'read', 'show', 'remember', 'forget', 'type', 'play', 'queue', 'me add', 'shortcut', 'front', 'watch', 'pick', 'set', 'web', 'history', 'hands', 'window', 'routine'))
 DRAW = shlex.quote(ME) + " --draw"
@@ -49,11 +45,7 @@ APP_COMMIT = 'unknown'
 try:
     APP_VERSION = Path(ME).with_name('VERSION').read_text().strip()
 except OSError:
-    try:
-        with open(Path(ME).parents[1] / 'Info.plist', 'rb') as f: info = plistlib.load(f)
-        APP_VERSION = info.get('CFBundleShortVersionString', 'unknown')
-        APP_COMMIT = info.get('AtticusCommit', 'unknown')
-    except (OSError, ValueError): APP_VERSION = 'unknown'
+    APP_VERSION = 'unknown'
 
 
 # About the user. Only a short name/answer-style line is always sent; category facts are attached when their
@@ -322,48 +314,9 @@ def profile_forget_source(source, evidence=''):
     return f'forgotten {before - len(profile["facts"])}'
 
 
-def mac_profile():
-    """Read Contacts My Card and Mail accounts only when Settings explicitly invokes import."""
-    script = r'''function run() {
-function failed(e) { if(out.errors.indexOf(source)<0) out.errors.push(source); if(out.errorReasons[source]!=="automation") out.errorReasons[source]=Number(e.errorNumber || e.number)===-1743 ? "automation" : "read"; }
-function safe(f,d) { try { var v=f(); return v === null || v === undefined ? d : v; } catch(e) { failed(e); return d; } }
-function pairs(xs) { return safe(()=>xs().map(x=>({label:safe(()=>x.label(),""),value:safe(()=>x.value(),"")})),[]); }
-var out={contacts:null,mail:null,errors:[],errorReasons:{}}, source="contacts";
-try {
-  var app=Application("Contacts"), p=app.myCard(), birthday=safe(()=>p.birthDate(),null);
-  out.contacts={
-    name:safe(()=>p.name(),""),
-    pronouns:safe(()=>p.pronouns(),""),
-    birthday:birthday && birthday.toISOString ? birthday.toISOString().slice(0,10) : birthday || "",
-    emails:pairs(()=>p.emails()), phones:pairs(()=>p.phones()), urls:pairs(()=>p.urls()),
-    addresses:safe(()=>p.addresses().map(x=>{var v=x.value();return {label:safe(()=>x.label(),"address"),value:[v.street,v.city,v.state,v.zip,v.country].filter(Boolean).join(", ")}}),[]),
-    organization:safe(()=>p.organization(),""), department:safe(()=>p.department(),""),
-    jobTitle:safe(()=>p.jobTitle(),""),
-    social:safe(()=>p.socialProfiles().map(x=>{var v=x.value();return {label:v.service || "social",value:v.url || v.username || v.userIdentifier || ""}}),[]),
-    related:pairs(()=>p.relatedNames())
-  };
-} catch(e) { failed(e); }
-try {
-  source="mail"; var mail=Application("Mail");
-  out.mail=safe(()=>mail.accounts().map(a=>({name:safe(()=>a.name(),""),emails:safe(()=>a.emailAddresses(),[])})),[]);
-} catch(e) { failed(e); }
-return JSON.stringify(out);
-}'''
-    try:
-        result = subprocess.run(['osascript', '-l', 'JavaScript', '-e', script], capture_output=True, text=True, timeout=20)
-        if result.returncode:
-            raise ValueError(result.stderr)
-        data = json.loads(result.stdout)
-        if not isinstance(data, dict):
-            raise ValueError('invalid import')
-        return data
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return {'contacts': None, 'mail': None, 'errors': ['contacts', 'mail']}
-
-
 @_profile_locked
 def profile_import(snapshot=None):
-    data, profile = snapshot if snapshot is not None else mac_profile(), me()
+    data, profile = snapshot if snapshot is not None else {}, me()
     incoming, refreshed = [], set()
     contacts_data = data.get('contacts') if isinstance(data, dict) else None
     if isinstance(contacts_data, dict) and 'contacts' not in data.get('errors', []):
@@ -420,7 +373,7 @@ def pref(key, default):
         with open(PREFS) as f:
             return json.load(f).get(key, default)
     except (OSError, ValueError):
-        return default   # recent: Atticus.app deletes it on ✕
+        return default
 
 
 def save_pref(key, value):
@@ -503,7 +456,7 @@ LOCAL_SERVERS = (
 SHOT = '/tmp/atticus-screen'   # + -<n>.jpg, one per display
 os.environ['PATH'] = f"/opt/homebrew/bin:/usr/local/bin:{HOME}/.local/bin:{HOME}/.claude/local:/usr/bin:/bin:/usr/sbin:" + os.environ.get('PATH', '')
 INNER = bool(os.environ.get('ATTICUS_ASK'))   # started by the AI's own tool call, not by the user
-APP = os.environ.get('ATTICUS_APP') or os.path.join(os.path.dirname(ME), 'bin', 'atticus-native')   # set by Atticus.app
+APP = os.environ.get('ATTICUS_APP') or os.path.join(os.path.dirname(ME), 'bin', 'atticus-native')   # set by the shell (bridge.py)
 
 # How the model is told to use a website, the mouse and keyboard, and window placement.
 _WEB_TOOL = (f'- Web pages, in Atticus\'s own browser window (separate from the user\'s everyday browser, so a site may need signing in there once): '
@@ -516,7 +469,7 @@ _HANDS_TOOL = (f'- Mouse and keyboard, at a place on the screen: {HANDS} click <
                'wrong click. Returns changed state; read documents with the window reader.\n')
 _PLACE_NOTE = 'full maximizes; fullscreen is the same as full (no separate Space on Linux).'
 
-SYSTEM = f"""You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.
+SYSTEM = f"""You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked. The request is a speech transcript, sometimes whispered or said over noise: expect misheard or missing words and wrong verb endings. When the intended request is clear from what this assistant can do and the devices it knows, act on it; when it is not, say what you heard and ask once. Transcripts lose question marks: a statement about the state of a device or of the computer ("o ar está ligado") is a question, so check and answer it. Never show a choice card to ask what the user meant when you can check for yourself or one reading is the likely one; keep choice cards for real alternatives, with short options. The user may answer a card in their own words instead of an option: then do what they said.
 Stable facts: answer only if sure. Current facts: search once; prefer dated primary sources. Never invent. Batch independent work.
 Before tools: 3-8 plain words, no command names.
 Final: answer first; ≤3 short sentences, more if asked; verified tasks 1 sentence. Markdown OK; LaTeX math: $inline$, $$display$$.
@@ -531,7 +484,7 @@ Tools:
 - For missing text or appearance/layout detail, {LOOK} prints fresh labelled pictures of all displays to Read; trust pictures over text.
 {_WEB_TOOL}{_HANDS_TOOL}
 - App/site: always try; never blame sandbox/Terminal. Name the denied Settings switch.
-- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.
+- System settings: the tools listed here first; else a shell command the user approves on the Allow card; verify.
 - Work behind: never activate/raise unless asked to open/show/switch/focus. {SHOW} --bg "<url|path|app>" opens behind, waits until ready. {SHOW} "<target>" respects Settings. {FRONT} "<app>" ["tab words"] pictures that window in place, even covered; raises only if asked. Helpers wait; never add sleep. Chain dependencies with &&; check each result.
 - Windows: {PLACE} "<process>" <left|right|full|fullscreen|center> <laptop|monitor|current|exact Context screen name> ["title words"]. {_PLACE_NOTE} Combine moves with +. Get names from --apps.
 - Type at the cursor: {TYPE} "<text>".
@@ -610,26 +563,23 @@ def client():
 # Safe mode (Settings, on by default): the gate checks every command; background agents also use Claude Code's sandbox.
 # Main asks do not advertise that sandbox to the model: their gated helpers must open apps and sites normally.
 # A chain runs outside only if every part is listed, so harmless read-only tools are too ("…; curl wttr.in", "| head").
-SAFE_OUT = [f'{c} *' for c in ('osascript', 'open', 'mdfind', 'curl', 'head', 'tail', 'grep', 'sort', 'wc', 'echo', 'sleep', 'date', ME)] + ['pbpaste', 'date'] + [f'orca terminal {c} *' for c in ('list', 'read', 'send')]
+SAFE_OUT = [f'{c} *' for c in ('open', 'mdfind', 'curl', 'head', 'tail', 'grep', 'sort', 'wc', 'echo', 'sleep', 'date', ME)] + ['wl-paste', 'date'] + [f'orca terminal {c} *' for c in ('list', 'read', 'send')]
 # What the user must OK first. Matched per command, so `open "…?q=buy shoes"` or a search for "delete" never asks.
 RISKY = [('Delete something?', r'\b(rm|rmdir|srm|unlink|shred|trash|mv)\s|\bdelete\b|empty (the )?trash'),
          ('Send this?', r'\bsend\b|\bsendmail\b|curl\b.*\s((?-i:-[a-zA-Z]*X)\s*[\'"]?(POST|PUT|PATCH|DELETE)|--request[\s=]*[\'"]?(POST|PUT|PATCH|DELETE)|--data|--form|--json|--upload-file|(?-i:-[a-zA-Z]*[dFT]))'),
          ('Buy this?', r'\b(buy|purchase|checkout|check out|place (an |the )?order|pay)\b'),
-         # every way curl, sort and AppleScript/JXA write a file: they run outside the sandbox
+         # every way curl and sort write a file
          ('Change a file?', r'(?<![0-9&])>>?\s*(?!/dev/null|&|/tmp/)\S|\btee\s|curl\b.*\s((?-i:-[a-zA-Z]*[oODcK])|--(output|remote-name|dump-header|cookie-jar|trace|stderr|libcurl|etag-save|hsts|alt-svc|config)\b)|%output\{'
-                            r'|\bsort\b.*\s((?-i:-[a-zA-Z]*o)|--output)|\bwrite\b.*\bto\b|write permission|writeTo(File|URL)'),
-         # AppleScript and JXA can run shell text: Terminal's do script, do shell script, run/load script, ObjC tasks
-         ('Run a system command?', r'\bdo ?(shell ?)?script\b|\b(run|load) ?script\b|\bNSTask\b|\$\.(system|popen)\b|\bsudo\b|\bkillall\b|\bdefaults write\b')]
-# Atticus.swift's riskyPattern: a raw System Events click asks for the same controls --hands does
+                            r'|\bsort\b.*\s((?-i:-[a-zA-Z]*o)|--output)'),
+         ('Run a system command?', r'\bsudo\b|\bdoas\b|\bpkexec\b|\bkillall\b|\bsystemctl\s+(?!--user\s+)?(start|stop|restart|enable|disable|mask)\b|\bgsettings\s+set\b')]
+# Labels of controls that send, buy, delete or sign out: clicking one asks first.
 RISKY_LABEL = r"(?i)\b(buy|purchase|pay|payment|checkout|order|send|delete|remove|trash|submit|publish|post|sign.?out|log.?out|unsubscribe|subscribe|transfer|bid|erase|withdraw|donate|authorize|grant access|allow access|logout|book|reserve|merge|deploy|discard|wipe|format|apply(?! filters| changes| settings| coupon| code| promo| discount| theme| style| formatting)|confirm)\b"
-RUNS = ('.command', '.tool', '.terminal', '.sh', '.zsh', '.bash', '.app', '.workflow', '.action')   # macOS runs these when opened
-RUNS += ('.desktop', '.appimage', '.run', '.fish', '.py', '.pl', '.rb', '.jar')
-APP_DIRS = ('/Applications/', '/System/Applications/', os.path.join(HOME, 'Applications') + '/')
-QUIET = (DRAW, SEARCH, READ, LOOK, FRONT, SHOW, PLACE, PLAY, QUEUE, TYPE, REMEMBER, FORGET, ABOUT, PICK, SET, WEB, HISTORY, HANDS, WINDOW, f'{shlex.quote(ME)} --calendar ', 'open ', 'mdfind ', 'pbpaste')   # helpers confirm their own risky actions
+RUNS = ('.sh', '.zsh', '.bash', '.fish', '.desktop', '.appimage', '.run', '.py', '.pl', '.rb', '.jar')   # opening one of these runs it
+QUIET = (DRAW, SEARCH, READ, LOOK, FRONT, SHOW, PLACE, PLAY, QUEUE, TYPE, REMEMBER, FORGET, ABOUT, PICK, SET, WEB, HISTORY, HANDS, WINDOW, 'open ', 'mdfind ', 'wl-paste')   # helpers confirm their own risky actions
 
 
 def launches_program(part):
-    """`open` or --show of a script, program or app outside the Applications folders: macOS runs it, outside the sandbox.
+    """`open` or --show of a script or a program: opening it runs it, outside the sandbox.
     A path that does not exist yet counts too: this same command makes it, so the gate cannot see what it is."""
     try: tokens = shlex.split(part)
     except ValueError: return False
@@ -650,7 +600,7 @@ def launches_program(part):
 def runs_path(t):
     if re.match(r'[a-z][\w+.-]*:', t, re.I) and not t.lower().startswith('file:'): return False   # a web or settings link
     path = os.path.abspath(os.path.expanduser(urllib.parse.unquote(re.sub(r'^file://', '', t, flags=re.I))))
-    return not os.path.exists(path) or path.lower().endswith(RUNS) and not (path.endswith('.app') and path.startswith(APP_DIRS)) or os.path.isfile(path) and os.access(path, os.X_OK)
+    return not os.path.exists(path) or path.lower().endswith(RUNS) or os.path.isfile(path) and os.access(path, os.X_OK)
 
 
 def risky(cmd):
@@ -659,21 +609,11 @@ def risky(cmd):
     for part in re.split(r'[;&|\n]', cmd) + re.findall(r'(?:\\.|"(?:[^"\\]|\\.)*"|\'[^\']*\'|[^;&|\n])+', cmd):
         part = part.strip()
         if launches_program(part): return 'Run a program?'
-        if re.search(r'(?:^|[\s/])osascript(?:\s|$)', part) and not re.search(r'\s-e\s', part) and '<<' not in cmd:
-            return 'Run a script?'   # from a file or a pipe: the gate cannot read what it does
         if part.startswith(QUIET) and '$(' not in part and '`' not in part:
             continue
         for q, rx in RISKY:
             if re.search(rx, re.sub(r'"[^"$`]*"', '""', part) if q == 'Change a file?' else part, re.I):   # "View > Zoom" menu paths are not redirects
                 return q
-        if 'osascript' in part and (re.search(r'\b(open|launch|run)', re.sub(r'"[^"]*"', '""', part), re.I) or re.search(r'application\s+"(/|~|file:)', part, re.I)) \
-                and any(map(runs_path, re.findall(r'"((?:/|~|file:)[^"]*)"', part))):
-            return 'Run a program?'   # Finder or an app opening a script, program or not-yet-made path
-        if 'osascript' in part and re.search(r'\bclick\b|perform action', part, re.I) and (re.search(r'\bclick at\b', part, re.I) or any(
-                re.search(RISKY_LABEL, s) or re.fullmatch(r'(?i)\s*(ok|yes|continue|allow|accept|agree|complete|finish|grant)\s*', s) for s in re.findall(r'"([^"]*)"', part))):
-            return 'Click this?'   # what --hands asks for too: a blind screen point, or a control that sends, buys, deletes or confirms
-        if 'osascript' in part and re.search(r'(keystroke\s+(return|enter|"[qwd]")|key code\s+(36|76|51|117|12|13|2|53))\s+using\s+(\{[^}]*)?command down', part, re.I):
-            return 'Press this key?'   # ⌘Return sends, ⌘Delete deletes, ⌘Q/⌘W close without asking
     return ''
 
 
@@ -1011,7 +951,7 @@ def set_switch(words, on):
 
 
 def thumb(path):
-    """A Quick Look thumbnail (images, PDFs, documents, videos) as a data URL, or '' if macOS has none."""
+    """A Quick Look thumbnail (images, PDFs, documents, videos) as a data URL, or '' if there is none."""
     out = tempfile.mkdtemp()   # one folder each: files with the same name must not share a thumbnail
     try:
         subprocess.run(['qlmanage', '-t', '-s', '480', '-o', out, path], capture_output=True, timeout=4)
@@ -1033,14 +973,6 @@ def choices(options):
              'kind': 'Folder' if os.path.isdir(p) else os.path.splitext(p)[1][1:6].upper()}
             if os.path.exists(p) else {'label': o, 'sub': '', 'path': '', 'img': '', 'kind': ''} for o, p, img in zip(options, paths, imgs)]
 
-
-def osa(script, *args, timeout=60):
-    return ''   # there is no AppleScript here; what still calls this treats the empty answer as "unavailable"
-
-
-def osa_quote(text):
-    """Text for inside an AppleScript "…" literal: a model- or page-supplied name must never end the string and run code."""
-    return str(text).replace('\\', '\\\\').replace('"', '\\"')
 
 
 def wants_focus(task=None, sites=False):
@@ -1094,7 +1026,7 @@ def preview_commands(cmd, directory=None):
     apps = re.findall(r'(?:tell (?:application(?: id)?|app|process)|process)\s+"([^"]+)"', cmd, re.I)
     title = next(iter(re.findall(r'(?:name (?:contains|is)|window)\s+"([^"]+)"', cmd, re.I)), '')
     for app in dict.fromkeys(apps):
-        if app != 'System Events': preview_app(app, title=title, directory=directory)
+        preview_app(app, title=title, directory=directory)
     try: tokens = shlex.split(cmd)
     except ValueError: return
     for i, token in enumerate(tokens):
@@ -1117,8 +1049,8 @@ def system_ui_context():
 
 
 def screens():
-    """[(name, x, y, w, h, built_in)], top-left coordinates like System Events uses; the first is the main one.
-    built_in comes from macOS itself, so laptop vs monitor works on any Mac, any number of displays."""
+    """[(name, x, y, w, h, built_in)], top-left coordinates; the first is the main one.
+    built_in tells the laptop's own panel from a monitor, with any number of displays."""
     try:
         out = subprocess.run([APP, '--screens'], capture_output=True, text=True, timeout=5).stdout
         rows = json.loads(out or '[]')
@@ -1142,7 +1074,7 @@ def describe(scr, fx=None, fy=None):
 
 
 def front():
-    # Atticus.app passes the app the user was in when the user pressed the keys (its own windows can take focus, e.g. onboarding)
+    # the shell passes the app the user was in when they asked (ATTICUS_FRONT)
     front_env = os.environ.get('ATTICUS_FRONT')
     try:
         w = json.loads(subprocess.run(['hyprctl', '-j', 'activewindow'], capture_output=True, text=True, timeout=2).stdout or '{}')
@@ -1150,11 +1082,11 @@ def front():
     return (front_env or w.get('class') or ''), (w.get('title') or '')
 
 
-ARRANGE = re.compile(r'--place\b|AXFullScreen|AXMinimized|\bset (bounds|position|size)\b|\bminiaturized\b', re.I)   # arranging windows is work the user sees
+ARRANGE = re.compile(r'--place\b', re.I)   # arranging windows is work the user sees
 
 
 def free_focus(user=False):
-    """Atticus.app's focus guard stands aside for 3 s: a move or full screen brings the app forward on purpose. Short, so a later
+    """The focus guard stands aside for 3 s: a move or full screen brings the app forward on purpose. Short, so a later
     background step (Spotify starting) still stays behind."""
     try: subprocess.run([APP, '--raise'] + (['user'] if user else []), capture_output=True, timeout=1)
     except (OSError, subprocess.TimeoutExpired): pass
@@ -1241,7 +1173,7 @@ def place_many(args):
     native = [i for i, m in enumerate(moves) if m[1] == 'fullscreen']
     with ThreadPoolExecutor(len(flat) or 1) as pool:   # plain moves at once
         out = dict(zip(flat, pool.map(lambda i: place(*moves[i]), flat)))
-    # native full screen is a Space animation, and macOS drops or misplaces one started during another: one window at a time,
+    # one window at a time, in order
     # each first out of any full screen and onto its display, so entering one never hides a window still to move
     if len(native) > 1:
         for i in native: out[i] = place(moves[i][0], 'full', *moves[i][2:])
@@ -1566,10 +1498,6 @@ def app_up(bid):
     return False
 
 
-def dashes(text):
-    return re.sub(r'[\u2010-\u2015\u2212]', '-', text)   # macOS writes "Wi‑Fi" with a non-breaking hyphen
-
-
 def plain(text):
     """Spoken request -> its core words: "Hey Atticus, can you open Spotify please?" -> "open spotify"."""
     text = re.sub(r',?\s*\b(?:u+h+|u+m+|e+r+m+|h+m+)\b,?', ' ', text, flags=re.I)
@@ -1706,12 +1634,6 @@ def shortcut_commands(task, commands, app=''):
         elif tokens[:3] == [ME, '--hands', 'click'] and len(tokens) == 4 and '>' in tokens[3]:
             if not app: return None   # an old menu click with no app target must return to the AI, never use today's front app
             command = f'{HANDS} menu {shlex.quote(app)} {shlex.quote(tokens[3])}'
-        elif tokens[0] == 'osascript':
-            lines = [re.sub(r'"(?:[^"\\]|\\.)*"', '""', s).strip() for i, t in enumerate(tokens) if i and tokens[i - 1] == '-e' for s in t.split('\n')]
-            # a read: get/count/…, a value coerced "as string", a bare property "to name of current track", or a bare test 'application "X" is running'
-            reads = [bool(re.search(r'\b(get|count|exists|return)\b|\bas (string|text|integer|number|real|boolean|list|record)\b|\bto \w+ of\b|^(?!.*\b(tell|if)\b).*\b(is|contains)\b', s, re.I)) and not re.search(r'\b(set|make|create|delete|click|press|perform|activate|open|close|quit|play|keystroke|key code|do shell script)\b', s, re.I) for s in lines]
-            # every line reads or only frames one ("tell app" … "end tell"): "-e 'to pause' -e 'get its state'" still acts
-            if any(reads) and all(r or re.fullmatch(r'tell (application|process) ""|end\b.*|delay [\d.]+|', s, re.I) for r, s in zip(reads, lines)): continue
         result.append(command)
     moving, merged = re.compile(r'\S*atticus\.py --place '), []
     for command in result:   # back-to-back moves go at once (--place a + b), like the AI's own
@@ -2166,7 +2088,7 @@ def look(cleanup=True, window=None):
         os.remove(path)
         if cleanup and not ask:
             atexit.register(lambda: os.path.exists(path) and os.remove(path))
-        # Atticus.app takes it, leaving its own box out; plain screencapture is the fallback (box included)
+        # the native helper takes the picture, leaving Atticus's own box out
         try:
             r = subprocess.run([APP, '--look', str(i), path] + ([str(window['windowID'])] if i == home else []), capture_output=True, text=True)
         except FileNotFoundError:
@@ -2195,7 +2117,7 @@ def look(cleanup=True, window=None):
 
 
 def get(url, timeout=10):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Macintosh) AppleWebKit/605 Safari/605'})
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'})
     try:
         response = urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as error:
@@ -2300,8 +2222,7 @@ def label(name, inp):
     if m:
         return 'Opening ' + (m[1] or m[2]).rstrip(';')
     for pat, fmt in ((r'^open "?https?://(?:www\.)?([^/"]+)', 'Opening {}'),
-                     (r'^mdfind', 'Searching your files'), (r'arxiv', 'Searching papers'), (r'^pbpaste', 'Reading the clipboard'),
-                     (r'tell application "(?!System Events)([^"]+)"', 'Using {}'), (r'process "([^"]+)"', 'Checking {} windows')):
+                     (r'^mdfind', 'Searching your files'), (r'arxiv', 'Searching papers'), (r'^wl-paste', 'Reading the clipboard')):
         m = re.search(pat, c)
         if m:
             return fmt.format(*m.groups())
@@ -2317,124 +2238,6 @@ RISKY_CLICK = (r'\b(send|post|publish|delete|remove|trash|buy|purchase|pay|check
                r'accept|agree|yes|ok|continue|subscribe|cancel|transfer|submits a form)\b')   # words that hide a send/delete/buy count too
 
 
-def browser_terms(app, adapter, window=None, tab=None):
-    """AppleScript protocol adapters selected by a live JavaScript probe, never by an app-name list."""
-    quoted = app.replace('\\', '\\\\').replace('"', '\\"')
-    current = 'id of active tab' if adapter == 'chromium' else 'index of current tab'
-    target = (f'execute (first tab of window id {window} whose id is {tab}) javascript (item 1 of argv)' if adapter == 'chromium'
-              else f'do JavaScript (item 1 of argv) in tab {tab} of window id {window}')
-    query = f'tell application "{quoted}"\nif (count windows) is 0 then error "No browser windows; use hands"\nreturn (id of window 1 as text) & (ASCII character 9) & ({current} of window 1 as text)\nend tell'
-    tell = f'tell application "{quoted}" to {target}'
-    return query, tell
-
-
-def browser_adapter(app):
-    """Return the page-JavaScript protocol an app actually answers, cached by bundle id."""
-    try:
-        if subprocess.run(['pgrep', '-xq', app], capture_output=True, timeout=.3).returncode:
-            return ''
-    except (OSError, subprocess.TimeoutExpired):
-        return ''
-    try:
-        quoted = app.replace('\\', '\\\\').replace('"', '\\"')
-        r = subprocess.run(['osascript', '-e', f'id of application "{quoted}"'],
-                           capture_output=True, text=True, timeout=.3)
-        key = r.stdout.strip() if not r.returncode and isinstance(r.stdout, str) and r.stdout.strip() else app
-    except (OSError, subprocess.TimeoutExpired):
-        key = app
-    cache_path = os.path.join(DIR, 'web-capabilities.json')
-    try:
-        with open(cache_path) as f: cached = json.load(f)
-        if cached.get(key) in ('chromium', 'webkit'): return cached[key]
-        if cached.get(key) is False: return ''
-    except (OSError, ValueError, AttributeError): cached = {}
-    def remember(value):
-        os.makedirs(DIR, mode=0o700, exist_ok=True)
-        cached[key] = value
-        with tempfile.NamedTemporaryFile(mode='w', dir=DIR, delete=False) as f:
-            json.dump(cached, f); name = f.name
-        os.chmod(name, 0o600); os.replace(name, cache_path)
-    try:
-        with open(WEB_JS) as f: src = f.read()
-    except OSError:
-        return ''
-    probe = f'({src})("ready", "", "")'
-    uncertain = False
-    permission_error = re.compile(r'-1743|not authorized|not allowed', re.I)
-    for adapter in ('chromium', 'webkit'):
-        query, _ = browser_terms(app, adapter)
-        try:
-            target = subprocess.run(['osascript', '-e', query], capture_output=True, text=True, timeout=.5)
-            ids = target.stdout.strip().split('\t') if isinstance(target.stdout, str) else []
-            if target.returncode:
-                uncertain = uncertain or bool(permission_error.search(target.stderr if isinstance(target.stderr, str) else ''))
-                continue
-            if len(ids) != 2 or not all(i.isdigit() for i in ids):
-                uncertain = True
-                continue
-            _, tell = browser_terms(app, adapter, *map(int, ids))
-            answer = subprocess.run(['osascript', '-e', f'on run argv\n{tell}\nend run', probe],
-                                    capture_output=True, text=True, timeout=.5)
-            error = answer.stderr if isinstance(answer.stderr, str) else ''
-            if answer.returncode and 'javascript' not in error.lower():
-                uncertain = uncertain or bool(permission_error.search(error))
-                continue
-            if not answer.returncode:
-                state = json.loads(answer.stdout if isinstance(answer.stdout, str) else '')
-                if not isinstance(state, dict) or 'ready' not in state: continue
-            remember(adapter)
-            return adapter
-        except (OSError, ValueError, subprocess.TimeoutExpired):
-            uncertain = True
-            continue
-    if not uncertain: remember(False)
-    return ''
-
-
-def agent_window(app):
-    """The browser window this agent task opened, while it is in the same browser; 0 when there is none."""
-    try:
-        with open(os.path.join(agent_gate_dir(os.environ['ATTICUS_ASK']), 'browser-window.json')) as f: saved = json.load(f)
-        return saved['window'] if saved.get('app') == app and type(saved.get('window')) is int else 0
-    except (KeyError, OSError, ValueError, AttributeError): return 0
-
-
-def work_page(app='', words='', ask=''):
-    """The user's open window a handed-off ask works in, so its agent acts there and nowhere else: the page this ask already
-    used, else app's tab whose title or URL has the words, else its front tab; other apps: its mapped window, else the front title. {} if none."""
-    try:
-        with open(os.path.join(ask, 'web.json')) as f: used = json.load(f)
-        used = {k: used[k] for k in ('app', 'adapter', 'window', 'tab')} if isinstance(used.get('app'), str) and all(type(used.get(k)) is int for k in ('window', 'tab')) else {}
-    except (OSError, ValueError, AttributeError, KeyError): used = {}
-    try:
-        with open(os.path.join(ask, 'hands.json')) as f: mapped = json.load(f) if ask else {}
-    except (OSError, ValueError): mapped = {}
-    if not isinstance(mapped, dict) or not isinstance(mapped.get('app'), str) or not str(mapped.get('windowID', '')).isdigit() or int(mapped['windowID']) <= 0:
-        mapped = {}
-    mapped = {k: mapped[k] for k in ('app', 'pid', 'windowID', 'window', 'windowFrame') if k in mapped}
-    reuse = bool(used) and (not app or used['app'] == app and not words)
-    if not app and not reuse: app = mapped.get('app', '')
-    if not app and not reuse: return {}
-    app = used['app'] if reuse else app
-    adapter = used['adapter'] if reuse else browser_adapter(app)
-    if not adapter:
-        target = mapped if not words and mapped.get('app', '').casefold() == app.casefold() else {}
-        title = target.get('window', '') if target else osa(f'tell application "System Events" to tell process "{osa_quote(proc_of(app))}" to get name of front window', timeout=2)
-        try:   # the user's other windows of the app at ask time (native hands): the agent's hands stay out of them too
-            with open(os.path.join(ask, 'hands.json.windows') if ask else hands_state() + '.windows') as f: windows = json.load(f)
-        except (OSError, ValueError): windows = None
-        return {'app': app, **({'target': target} if target else {}), **({'title': title} if title else {}), **({'windows': windows} if isinstance(windows, dict) else {})}
-    title, active, tab_id, pinned = (('title', 'active tab', 'id', 'first tab of w whose id is ((item 3 of argv) as integer)') if adapter == 'chromium' else
-                                     ('name', 'current tab', 'index', 'tab ((item 3 of argv) as integer) of w'))
-    row = f'return (id of w as text) & (ASCII character 9) & ({tab_id} of t as text) & (ASCII character 9) & {title} of t & (ASCII character 9) & URL of t'
-    found = osa(f'on run argv\ntell application "{osa_quote(app)}"\nif (item 2 of argv) is not "" then\nset w to window id ((item 2 of argv) as integer)\nset t to {pinned}\n{row}\nend if\n'
-                f'if (item 1 of argv) is not "" then\nrepeat with w in windows\nrepeat with t in tabs of w\n'
-                f'if ({title} of t contains item 1 of argv) or (URL of t contains item 1 of argv) then {row}\nend repeat\nend repeat\nend if\n'
-                f'set w to window 1\nset t to {active} of w\n{row}\nend tell\nend run', words, *((str(used['window']), str(used['tab'])) if reuse else ('', '')), timeout=3).split('\t')   # a reused page's URL too: the agent acts only while it stays on that site
-    if len(found) != 4 or not all(i.isdigit() and int(i) > 0 for i in found[:2]): return {'app': app}
-    return {'app': app, 'adapter': adapter, 'window': int(found[0]), 'tab': int(found[1]), 'title': found[2][:200], 'url': found[3][:2000]}
-
-
 def running_app(name):
     """The running app's exact name for a name the model wrote, as said ("chrome") or exact ('' when none runs)."""
     for n in dict.fromkeys(filter(None, (name, app_named(name)))):
@@ -2442,14 +2245,6 @@ def running_app(name):
         except (OSError, subprocess.TimeoutExpired): continue
         if found: return found
     return ''
-
-
-def handed_page():
-    """The user's page this agent task was handed (outside its sandbox): the one page of the user's it may act on."""
-    try:
-        with open(os.path.join(agent_gate_dir(os.environ['ATTICUS_ASK']), 'work-page.json')) as f: page = json.load(f)
-        return page if isinstance(page, dict) else {}
-    except (KeyError, OSError, ValueError): return {}
 
 
 def page_ready(read, want=''):
@@ -2545,28 +2340,7 @@ def web(cmd, n='', text='', app=None, fresh=False, want='', page=None):
         return f'Could not use the page: {e}\nUse the screen instead: {LOOK} and {HANDS}'
 
 
-def allow_page_js(app, ask=False):
-    """Verify Chromium page scripting, enabling it after consent if needed."""
-    if ask and not pref('pageJS', False) and not pref('fixSetup', False):
-        if not os.environ.get('ATTICUS_ASK') or ask_user({'need': 'page-js', 'app': app, 'q': f'I can turn on page reading in {app} for you',
-                                                          'cmd': 'View > Developer > Allow JavaScript from Apple Events, kept on.'}, 60) != 'y':
-            return False
-        if not os.environ.get('ATTICUS_AGENT'): ask_user({'set': 'pageJS', 'value': True}, 5)   # an agent's chip sets it on Allow
-    def enabled():
-        # A windowless browser needs a disposable tab to test the actual permission.
-        return osa(f'tell application "{osa_quote(app)}"\nset probeWindow to missing value\ntry\n'
-                   'if (count windows) is 0 then set probeWindow to make new window\n'
-                   'set answer to execute active tab of window 1 javascript "1"\n'
-                   'on error\nif probeWindow is not missing value then close probeWindow\nreturn ""\nend try\n'
-                   'if probeWindow is not missing value then close probeWindow\nreturn answer\nend tell', timeout=5) == '1'
-    if enabled(): return True
-    # shortcut: Chromium's View is fifth, Developer and its toggle are last; update if its menu layout changes.
-    return osa('on run argv\ntell application "System Events" to tell process (item 1 of argv)\n'
-        'set m to last menu item of menu 1 of last menu item of menu 1 of menu bar item 5 of menu bar 1\n'
-        'if value of attribute "AXMenuItemMarkChar" of m is missing value then click m\nreturn "on"\nend tell\nend run', proc_of(app)) == 'on'
-
-
-# Setup an agent can ask for mid-task. macOS lets only the user flip its privacy switches; page reading Atticus turns on itself.
+# Setup that can be asked for mid-task. Only the user can grant it; page reading Atticus turns on itself.
 NEEDS = {'accessibility': 'Accessibility', 'screen': 'Screen Recording', 'automation': 'Automation', 'calendar': 'Calendar',
          'microphone': 'Microphone', 'page-js': 'page reading'}
 
@@ -2582,7 +2356,7 @@ def need(kind, why='', app='', do=False):
         app = app or 'Google Chrome'
         if do or pref('fixSetup', False): emit([f'▸ Turning on page reading in {app}'])
         elif ask_user({'need': kind, 'app': app, 'q': f'I can turn on page reading in {app} for you', 'cmd': why}, min(wait, 600)) != 'y': return skip
-        return f'Turned on {name}. Continue, and say so in one line.' if allow_page_js(app) else f'Could not turn on {name}. ' + skip
+        return f'Turned on {name}. Continue, and say so in one line.' if False else f'Could not turn on {name}. ' + skip
     return f'{name} is on now. Continue the task with it.' if ask_user({'need': kind, 'app': app, 'q': f'Turn on {name}', 'cmd': why}, wait) == 'y' else skip
 
 
@@ -2641,25 +2415,6 @@ def hands_state():
     return os.environ.get('ATTICUS_HANDS_STATE', os.path.join(DIR, 'hands.json'))
 
 
-def agent_window_id(app):
-    """The task's exact native pin, else its opened or handed browser window's CG id ('' when neither).
-    Native resolves the exact pin or refuses; None when a browser window cannot be resolved."""
-    if not app or not os.environ.get('ATTICUS_AGENT'): return ''
-    handed = handed_page()
-    if str(handed.get('app', '')).casefold() == app.casefold() and isinstance(handed.get('target'), dict):
-        return str(handed['target'].get('windowID', '')) or None
-    window = agent_window(app) or (handed.get('window') if str(handed.get('app', '')).casefold() == app.casefold() and type(handed.get('window')) is int else 0)
-    if not window: return ''
-    quoted = app.replace('\\', '\\\\').replace('"', '\\"')
-    try:
-        r = subprocess.run(['osascript', '-e', f'tell application "{quoted}" to get bounds of window id {window}'], capture_output=True, text=True, timeout=2)
-        left, top, right, bottom = map(float, r.stdout.strip().split(', '))
-        r = subprocess.run([APP, '--window-target', app, '', json.dumps([left, top, right - left, bottom - top])], capture_output=True, text=True, timeout=2)
-        identifier = str(json.loads(r.stdout)['windowID'])
-        return identifier if identifier.isdigit() and int(identifier) > 0 else None
-    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired): return None
-
-
 def hands_pin(args, target=None, state=None):
     """(window id, strict): the window a hands call must stay in. Agents keep their own browser window, else the window they mapped
     last in that app; a main ask follows the front one, never into the user's other windows (native, hands.json.windows). Only a pin from the last map may give way to a fresh look."""
@@ -2668,8 +2423,6 @@ def hands_pin(args, target=None, state=None):
     mapped = cached_hands() or {}
     looks = args[:1] in (['see'], ['identify'], ['read'])
     app = (args[1] if len(args) > 1 else os.environ.get('ATTICUS_FRONT', '')) if looks else str(mapped.get('app', ''))
-    own = agent_window_id(app)
-    if own != '': return own, True
     same = not looks or app.casefold() in (str(mapped.get('app', '')).casefold(), str(mapped.get('pid', '')))
     return (str(mapped.get('windowID', '')) if same else ''), False
 
@@ -2800,35 +2553,6 @@ def hands(*args):
     return hands_linux(*args)
 
 
-def menu_bar_icons():
-    """Every top-right menu bar icon by name (Wi-Fi, Bluetooth, battery, clock, app icons), read without touching the target map."""
-    try:
-        r = hands_call(['see', 'MenuBarAgent'], timeout=2, state=hands_state() + '.bar')   # macOS 26 keeps them all here
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    icons = re.findall(r'^\[\d+\] MenuBarItem "(.+?)"(?: = "(.*?)")? \(at ([1-9]\d*),', r.stdout, re.M) if not r.returncode else []   # x 0: its own app menus
-    return [(n, v) for n, v, _ in icons]
-
-
-def menu_bar_click(target):
-    """Anything on the Mac is fair game: a click that misses the front app tries the top-right menu bar icons, then reads the panel."""
-    want = dashes(target).lower()
-    hits = [n for n, _ in menu_bar_icons() if want in dashes(n).lower()]
-    if len(hits) != 1 or not hands_map('MenuBarAgent'):   # only now does the menu bar become the target
-        return None
-    os.environ['ATTICUS_BAR'] = '1'
-    try:
-        result, ok = hands('click', hits[0])
-    finally:
-        os.environ.pop('ATTICUS_BAR', None)
-    if ok:
-        time.sleep(0.3)   # the panel opens in Control Center; its map becomes the next target
-        panel = hands_call(['see', 'Control Center'], timeout=2)
-        if not panel.returncode:
-            result += '\nPanel:\n' + panel.stdout.strip()
-    return result, ok
-
-
 def emit(lines, directory=None):
     for line in lines[:1]:
         if line.startswith('▣ '):   # "click into it" next turn means this window, not whatever is in front
@@ -2885,7 +2609,7 @@ def hands_replayable(command):
         if group: groups.append(group)
         for group in groups:
             if '--hands' not in group:
-                if not group or not (group[0] in ('open', 'osascript', 'test', '[') or group[0] == ME and len(group) > 1 and group[1] in ('--show', '--place', '--play', '--queue', '--type')): return False
+                if not group or not (group[0] in ('open', 'test', '[') or group[0] == ME and len(group) > 1 and group[1] in ('--show', '--place', '--play', '--queue', '--type')): return False
                 continue
             i = group.index('--hands')
             if group[:i] not in ([ME], [sys.executable, ME], ['python3', ME]):
@@ -2941,11 +2665,7 @@ def fast_hands(text):
     # Native actions wait for final words; existing safe built-ins can still run live.
     if os.environ.get('ATTICUS_LIVE') == '1':
         return None
-    if icon:   # a top-right menu bar icon by any name: no AI
-        bar = menu_bar_click(icon[1].replace('wifi', 'wi-fi'))
-        if bar and bar[1]:
-            return bar[0].splitlines()[0]
-        if not command: return None
+    if not command: return None
     args, target = command
     m = (cached_hands() if os.environ.get('ATTICUS_HANDS_STATE') else None) or hands_map(os.environ.get('ATTICUS_FRONT', ''))
     if not m:
@@ -3171,7 +2891,7 @@ def notify(text):
 
 
 def watch(what, then, app='', words='', mode='', phrase=''):
-    """Free while it waits: every 5 s, a shell test (`what`, exit 0 = done) or one window's text read on this Mac. No AI;
+    """Free while it waits: every 5 s, a shell test (`what`, exit 0 = done) or one window's text read here. No AI;
     the AI runs again only for `then`."""
     norm = lambda s: ' '.join(s.lower().split())
     phrase, hits, misses, end, last = norm(phrase), 0, 0, time.time() + 3 * 3600, None
@@ -3227,7 +2947,7 @@ def clean(text):
     t = str(text).replace(ME, 'atticus').replace(HOME, '~')
     t = re.sub(r'((?:--type|--hands type (?:"[^"]*"|\S+)|--web fill \d+)\s+)("(?:[^"\\]|\\.)*"|\'[^\']*\')', r'\1<text>', t)
     t = re.sub(r'((?:--hands|--web) type-after\s+(?:"(?:[^"\\]|\\.)*"|\'[^\']*\'|\S+)\s+)("(?:[^"\\]|\\.)*"|\'[^\']*\')', r'\1<text>', t)
-    t = re.sub(r'(\b(?:keystroke|to)\s+|[{,]\s*\w+\s*:\s*)"(?:[^"\\]|\\.)*"', r'\1"<text>"', t)   # AppleScript typing and text set into apps
+    t = re.sub(r'(\b(?:keystroke|to)\s+|[{,]\s*\w+\s*:\s*)"(?:[^"\\]|\\.)*"', r'\1"<text>"', t)   # text typed or set into apps
     t = re.sub(r'[\w.+-]+@[\w-]+\.[\w.]+', '<email>', t)
     t = re.sub(r'(https?://[^\s"\'?#]+)[?#][^\s"\']*', r'\1', t)
     t = re.sub(r'~/[^\s"\']+', '~/<path>', t)
@@ -3396,7 +3116,7 @@ STOPPING = False
 
 
 def append_log(row):
-    os.makedirs(DIR, mode=0o700, exist_ok=True); os.chmod(DIR, 0o700)   # older installs made it (and memory.md, license) readable to other Mac accounts
+    os.makedirs(DIR, mode=0o700, exist_ok=True); os.chmod(DIR, 0o700)   # older installs made it (and memory.md, license) readable to other accounts
     fd = os.open(os.path.join(DIR, 'log.jsonl'), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try: os.fchmod(fd, 0o600); os.write(fd, (json.dumps(row) + '\n').encode())
     finally: os.close(fd)
@@ -3703,7 +3423,7 @@ Look-act loops (repeated actions in one window toward a goal): each round pictur
 A named app's windows are read and acted on with --front/--window/hands wherever they are (any screen, covered); never conclude one is missing from --look pictures. Atticus's own box, shelf and cards are never the named app's UI. Messaging an agent/chat/session in a named app: pick the tab, row or session whose title or text matches the subject; if several or none match, ask once listing the real names you read; then type into that one's composer and send if asked.
 If the steps are known, emit [agent-plan {"steps":["short step"],"completed":0}] and update completed only after verifying those steps. This is a progress hint, never an estimate.
 '''
-AGENT_SYSTEM += (f'If missing setup would help (macOS blocks a permission or Automation, a browser blocks page reading): {shlex.quote(ME)} --need '
+AGENT_SYSTEM += (f'If missing setup would help (something the task needs is not set up): {shlex.quote(ME)} --need '
                  f'accessibility|screen|automation|calendar|microphone|page-js "<why, one line>" [app] [--do if the user said to change settings yourself]. '
                  f'It asks the user and waits; follow its answer.\n')
 
@@ -3934,7 +3654,7 @@ def action_kind(tool, inp):
         start, name = False, os.path.basename(token)
         if name in ('eval', 'env', 'xargs', 'command', 'exec', 'nohup', 'sudo', 'nice', 'time', 'timeout', 'builtin', 'sh', 'bash', 'zsh', 'dash', 'fish'): return ''
         if re.fullmatch(r'python(?:3(?:\.\d+)?)?', name) and i + 1 < len(tokens) and not tokens[i + 1].startswith('-'): start = True; continue   # the script is the program
-        if re.fullmatch(r'python(?:3(?:\.\d+)?)?|perl|ruby|node|osascript', name): return ''
+        if re.fullmatch(r'python(?:3(?:\.\d+)?)?|perl|ruby|node', name): return ''
         kinds.append(' '.join([name, *tokens[i + 1:i + 3]]) if name == 'atticus.py' else name)
     # an approved `curl <page>` must not cover `curl -T <file>`, nor a sandboxed run one that can write anywhere: each is its own kind
     q = ', '.join(filter(None, [risky(command), 'outside the sandbox' if inp.get('dangerouslyDisableSandbox') else '']))
@@ -4205,11 +3925,7 @@ def system_prompt(risky):
     """The Atticus system prompt: the shared helpers and reply protocol, plus this client's risky-action rule."""
     system = SYSTEM.replace('NEVER_RISKY', risky)
     # Lines of the base prompt that name tools this desktop does not have are put in terms of the ones it has.
-    swaps = (('You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.',
-              'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked. The request is a speech transcript, sometimes whispered or said over noise: expect misheard or missing words and wrong verb endings. When the intended request is clear from what this assistant can do and the devices it knows, act on it; when it is not, say what you heard and ask once. Transcripts lose question marks: a statement about the state of a device or of the computer ("o ar está ligado") is a question, so check and answer it. Never show a choice card to ask what the user meant when you can check for yourself or one reading is the likely one; keep choice cards for real alternatives, with short options. The user may answer a card in their own words instead of an option: then do what they said.'),
-             ("- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.\n",
-              '- System settings: the tools listed here first; else a shell command the user approves on the Allow card; verify.\n'),
-             (' People: --contacts "<name/relationship>" or the app address book; missing/ambiguous: choices, never guess.',
+    swaps = ((' People: --contacts "<name/relationship>" or the app address book; missing/ambiguous: choices, never guess.',
               ' People: there is no address book to read here; ask who is meant when it is not clear, never guess.'),
              (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',
               ' There is no calendar helper on this system: use --remind for things to be reminded of, and say so if a real calendar event was asked for.'),
@@ -4227,7 +3943,6 @@ def system_prompt(risky):
     if client() == 'claude' and not server() and not linux:   # background agents are not wired into the Linux shell
         head, _, rest = system.partition('\n')
         system = head + '\n' + AGENT_HANDOFF + rest
-    # screen drawing and the pointer are drawn by the macOS shell; the Linux overlay has neither
     return (system + (ASK_ME if pref('askMe', True) else '') +
             (DRAWING if pref('draw', True) and not linux else '') + (POINTER if pref('pointer', False) and not pref('draw', True) and not linux else '') + (LEARN_ME if pref('learnMe', True) else '') +
             (TEACH if pref('tips', True) else '') + (WORKFLOW if pref('learn', True) else ''))
@@ -4335,16 +4050,14 @@ def relay(p=None, directory=None):
             elif 'pick' in j and os.environ.get('ATTICUS_UI') == '1':   # "◇ {json}": the choices card
                 print('◇ ' + json.dumps({'q': j['pick'], 'options': choices(j['options']), 'a': a}), flush=True)
             elif 'pick' in j:
-                r = osa('on run argv\nset r to choose from list (rest of argv) with prompt (item 1 of argv)\nif r is false then return ""\nreturn item 1 of r\nend run', j['pick'], *j['options'])
+                r = ''   # no box to show the choices in: nothing is chosen
                 Path(a + '.tmp').write_text(str(j['options'].index(r)) if r in j['options'] else '')
                 os.rename(a + '.tmp', a)   # whole, or the waiting side reads it half-written
             elif os.environ.get('ATTICUS_UI') == '1':
                 print(f"? {j['q']}\t{' '.join(j['cmd'].split())}\t{a}" + (f"\t\t\t{json.dumps({'need': j['need'], 'app': j.get('app', '')})}" if j.get('need') else
                       f"\t\tretry\t{' '.join(j.get('details', '').split())}" if j.get('retry') else ''), flush=True)   # not say(): it would squash the tabs
             else:
-                buttons = ['Not now', 'Retry'] if j.get('retry') else ["Don't Allow", 'Allow']
-                result = osa('on run argv\ndisplay dialog (item 2 of argv) with title (item 1 of argv) buttons (items 3 thru -1 of argv)\n'
-                             'return button returned of result\nend run', j['q'], j['cmd'], *buttons)
+                result = ''   # no box to show the card in: nothing is allowed
                 Path(a + '.tmp').write_text('r' if result == 'Retry' else 'y' if result == 'Allow' else 'n')
                 os.rename(a + '.tmp', a)
         time.sleep(0.02)   # the final answer waits for this loop to notice the worker ended; cards and steps show sooner too
@@ -4443,7 +4156,7 @@ class MainMove:
     def handoff(self):
         request, task = main_ask(self.task, self.request)
         context = handoff_context(task, list(self.trace.values()))
-        page = work_page(ask=self.p.ask)   # the page this ask was already working in, if any
+        page = {}
         return {'title': agent_title(request), 'brief': request[:1000], 'request': request, 'context': context,
                 'app': page.get('app') or os.environ.get('ATTICUS_FRONT', ''), 'page': page, 'accepted': True, 'focus': wants_focus()}
 
@@ -4466,7 +4179,7 @@ def run(task, p=None, shots=(), auto_work=False, *, request=None, main_only=Fals
     if not p:
         c = plan()
         run.why = 'signed_out' if c.get('need') == 'login' else 'setup_needed'
-        say('!', 'setup')   # Atticus.app opens its setup window
+        say('!', 'setup')   # the shell shows how to set the client up
         return c['text'] + ' Open Atticus Settings to finish setup.', 0, []
     if getattr(p, 'ask', ''):
         save_request(p.ask, main_ask(task, request)[0])
@@ -4577,7 +4290,7 @@ def run(task, p=None, shots=(), auto_work=False, *, request=None, main_only=Fals
                     for handoff in directives:
                         brief = str(handoff.get('brief', '')).replace(MODEL_OFFER, '').replace(MODEL_OFFER.strip(), '').strip() or confirmed[:1000]
                         app = running_app(handoff['app']) if handoff.get('app') else os.environ.get('ATTICUS_FRONT', '')   # unnamed: the window the user asked over
-                        page = work_page(app, handoff.get('page', ''), getattr(p, 'ask', '')) if app else {}
+                        page = {}
                         run.handoffs.append({**handoff, 'brief': brief, 'context': context, 'request': confirmed, 'app': app or os.environ.get('ATTICUS_FRONT', ''), 'page': page})
                         persist_handoff(run.handoffs[-1], p.pid)
                         if run.handoff is None:
@@ -4768,7 +4481,7 @@ def run_devin(task, shots=(), request=None):
     run.ok = False
     if not shutil.which('devin'):
         run.why = 'setup_needed'
-        say('!', 'setup')   # Atticus.app opens its setup window
+        say('!', 'setup')   # the shell shows how to set the client up
         return plan()['text'] + ' Open Atticus Settings to finish setup.', 0, []
     if not wait_commit():
         run.why = 'cancelled'
@@ -5466,11 +5179,6 @@ def remember_turn(q, a, shortcut=None, agents=()):
     return turn
 
 
-def ask():
-    out = osa('tell application "System Events"\nactivate\nset r to display dialog "What should I do?" default answer "" '
-              'buttons {"Cancel", "Go"} default button "Go" with title "Atticus"\nreturn text returned of r\nend tell')
-    return out.strip()
-
 
 MEETING_BRIEF_LIMIT = 6000
 MEETING_STYLE_LIMIT = 300
@@ -5539,10 +5247,9 @@ MEETING_DEMO_BRIEF = 'Project Cedar launches November 12. The approved pilot bud
 def feedback(data):
     model = pref('model', DEFAULT_MODEL)
     model = model if model in ('haiku', 'sonnet', 'opus') else 'custom'
-    mac = subprocess.run(['/usr/sbin/sysctl', '-n', 'hw.model'], capture_output=True, text=True).stdout.strip()
     text = str(data.get('text', '')).strip()[:4000]   # what the user typed in Settings; they see it in the preview before it goes anywhere
     body = (f'## What happened\n\n{text}\n\n' if text else '## What happened\n\n\n## What you expected\n\n\n') + ('## Atticus\n'
-            f'Version: {APP_VERSION}\nVersion / commit: {str(data.get("version", "unknown"))[:80]}\nmacOS: {platform.mac_ver()[0]}\nMac model: {mac}\n'
+            f'Version: {APP_VERSION}\nVersion / commit: {str(data.get("version", "unknown"))[:80]}\nSystem: Linux {platform.release()}\n'
             f'AI client: {client()}\nModel: {model}\nRouting: {routing_mode()}\nSafe mode: {"on" if pref("safe", True) else "off"}\n'
             f'Input: {"type" if pref("input", "voice") == "type" else "voice"}\n'
             f'Shortcut: {"toggle" if pref("talkMode", "hold") == "toggle" else "hold"}\n')
@@ -5614,9 +5321,6 @@ def main():
         return print(json.dumps(models()))
     if args[:1] == ['--set'] and len(args) == 3:
         return set_switch(args[1], args[2].lower())
-    if args[:1] == ['--need'] and len(args) > 1:   # an agent asks for setup that would help: --need <kind> "<why>" [app] [--do]
-        rest = [a for a in args[2:] if a != '--do']
-        return print(need(args[1], *rest[:2], do='--do' in args))
     if args == ['--connectors']:
         return print(json.dumps(connectors()))
     if args[:1] == ['--pick'] and len(args) > 1:
@@ -5803,7 +5507,7 @@ def main():
     state_dir = tempfile.mkdtemp(prefix='atticus-hands-')
     atexit.register(shutil.rmtree, state_dir, True)
     os.environ['ATTICUS_HANDS_STATE'] = os.path.join(state_dir, 'hands.json')
-    warm = start_ai() if args == ['--wait'] else None   # Atticus.app: started at key-down, request comes on stdin at release
+    warm = start_ai() if args == ['--wait'] else None   # started early; the request comes on stdin
     os.environ['ATTICUS_ASK'] = warm.ask if warm else state_dir
     shots = []
     snap = threading.Thread(target=lambda: shots.extend(look()), daemon=True)   # only started when readable context is thin
@@ -5845,7 +5549,7 @@ def main():
             card = str(request.get('agentCard') or '')
         else: front_now, _, task = line.rpartition('\t')
         os.environ['ATTICUS_FRONT'] = front_now or os.environ.get('ATTICUS_FRONT', '')
-    task = task if args == ['--wait'] else ' '.join(a for a in args if a != '--plan') or ask()
+    task = task if args == ['--wait'] else ' '.join(a for a in args if a != '--plan')
     if not task:
         return warm and stop_claude(warm)
     marked, marked_images = point_context(marks)
@@ -5918,7 +5622,7 @@ def main():
     mem = relevant_rules(task)
     procedure = workflows(task) if pref('learn', True) else ''
     turns = recent()
-    turns = [r for r in turns if time.time() - r['t'] < 600][-3:]   # this chat only (Atticus.app clears it for a new one); 10 min cap for typed asks
+    turns = [r for r in turns if time.time() - r['t'] < 600][-3:]   # this chat only; 10 min cap
     previous_shortcut = turns[-1].get('shortcut') if turns and isinstance(turns[-1].get('shortcut'), dict) and isinstance(turns[-1]['shortcut'].get('key'), str) else None
     previous_shortcut = failed_replay or previous_shortcut
     earlier = earlier_chat(turns)
@@ -6084,7 +5788,7 @@ def run_main():
         finally:
             exception_error(type(error), error.__traceback__, error, kind='worker_exit', worker='python')
             traceback.print_exception(type(error), error, error.__traceback__)
-            sys.exit(70)   # handled and reported; Swift reports all other abnormal exits
+            sys.exit(70)   # handled and reported
 
 
 if __name__ == '__main__':

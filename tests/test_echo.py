@@ -27,5 +27,12 @@ class OwnWords(unittest.TestCase):
         self.assertEqual(own_words("ligado em 18 graus desliga o ar", SPOKEN), "desliga o ar")
 
 
+    def test_a_number_from_its_own_sentence_is_not_a_request(self):
+        said = "Um dia tem 1.440 minutos, que é 24 horas vezes 60 minutos."
+        self.assertEqual(own_words("440.", said), "")
+        self.assertEqual(own_words("60", said), "")
+        self.assertEqual(own_words("não", "Eu não sei o que é isso."), "não")   # a short word people do say over it
+
+
 if __name__ == "__main__":
     unittest.main()

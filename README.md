@@ -26,9 +26,9 @@ you said in Brazilian Portuguese or English, runs it through a command-line
 assistant, and reads the answer back in a natural voice. It can also look at your
 screen and search the web when the request needs it.
 
-This is a Linux port of the macOS app [atticus-mac](https://github.com/SaarthurR/atticus-mac).
-The brain is reused as is; the shell (overlay, audio, hotkey, wake word, text to
-speech) is rewritten for Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
+The brain (`atticus.py`) thinks with a Claude model through the `claude` command;
+the shell (overlay, audio, hotkey, wake word, text to speech) is written for
+Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
 
 ## Features
 
@@ -210,6 +210,13 @@ voice by [Piper](https://github.com/OHF-Voice/piper1-gpl).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Music
+
+"Toca Tim Maia" plays it. With the Spotify app installed the song, album,
+artist or playlist is played there; without it, the sound of the best match on
+YouTube is played through `mpv` (needs `mpv` and `yt-dlp`). "Pausa", "próxima",
+"para" and "o que está tocando" work on either.
 
 ## Websites
 

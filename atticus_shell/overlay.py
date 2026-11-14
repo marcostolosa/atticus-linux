@@ -1,13 +1,12 @@
 """The Atticus overlay box.
 
-Port of the WKWebView panel from Atticus.swift: a top-left, always-on-top
-surface that never steals focus, renders ui/ui.html, and exposes the same
-`ui.*` JavaScript API the brain drives. On Wayland the always-on-top,
-focus-free surface is a wlr-layer-shell layer (via gtk4-layer-shell).
+A top-left, always-on-top surface that never takes the keyboard focus: a
+wlr-layer-shell layer (gtk4-layer-shell) holding a WebKit view of ui/ui.html.
+The brain's output is turned into calls on the page's `ui.*` functions.
 
-Two message channels match the Swift build exactly:
-  - page -> shell "h": content height (or [w,h] in dictation) -> resize box
-  - page -> shell "c": a dict of UI events (send, copy, link, focus, fold, ...)
+The page talks back on two channels:
+  - "h": content height (or [w,h] in dictation) -> resize the box
+  - "c": a dict of UI events (send, copy, link, focus, fold, model, ...)
 """
 from __future__ import annotations
 
@@ -55,7 +54,7 @@ def _ui_language() -> str:
 
 
 def load_page(name: str) -> str:
-    """Replicate Swift loadPage(): inline orbs.js and i18n.js at their markers."""
+    """A page as one document: orbs.js and i18n.js go in at their markers."""
     html = (UI / name).read_text(encoding="utf-8")
     orbs = _read(UI / "orbs.js")
     i18n = _read(UI / "i18n.js")

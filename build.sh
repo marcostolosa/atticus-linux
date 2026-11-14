@@ -28,6 +28,7 @@ pkg_for() { case "$1" in
   notify-send) echo "libnotify";;
   wpctl) echo "wireplumber";;
   brightnessctl) echo "brightnessctl";;
+  gio) echo "glib2";;
   *) echo "$1";;
 esac; }
 # fd/rg back the file-search tool; ydotool/playerctl back native click/type
@@ -36,9 +37,13 @@ esac; }
 # bwrap is the sandbox every unlisted shell command runs in; without it each
 # of those asks for an Allow card instead. wtype types text with the real
 # keyboard layout; notify-send/wpctl/brightnessctl back alarms and controls.
-for t in grim slurp wl-copy tesseract ffmpeg fd rg ydotool playerctl bwrap wtype notify-send wpctl brightnessctl; do
+# mpv and yt-dlp play music by name when Spotify is not installed; gio moves
+# files to the trash.
+for t in grim slurp wl-copy tesseract ffmpeg fd rg ydotool playerctl bwrap wtype notify-send wpctl brightnessctl mpv yt-dlp gio; do
   command -v "$t" >/dev/null || need_sys+=("$(pkg_for "$t")")
 done
+command -v brave >/dev/null || command -v chromium >/dev/null || command -v google-chrome-stable >/dev/null \
+  || echo "Note: no Chromium browser found (brave, chromium, chrome); websites will be used by picture and mouse only."
 python3 -c 'import gi; gi.require_version("WebKit","6.0"); gi.require_version("Gtk4LayerShell","1.0")' 2>/dev/null \
   || need_sys+=("webkitgtk-6.0 gtk4-layer-shell python-gobject")
 if [ ${#need_sys[@]} -gt 0 ]; then

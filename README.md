@@ -136,6 +136,8 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `wake` | `false` | Enable the always-on wake word. |
 | `wakeWord` | `"siri"` | The word that starts listening. |
 | `asrModel` | `"small"` | Whisper model. `"base"` answers about 2 s sooner on a laptop CPU but mishears more. |
+| `sttRemote` | `"auto"` | Use the Home Assistant server's Whisper service for speech recognition when `haUrl`/`haToken` are set (usually a larger model on a stronger machine: faster and far better with whispers). Falls back to the local model. `"off"` keeps it local. |
+| `sttEntity` | auto | Which `stt.*` entity to use on that server. |
 | `instant` | `true` | Run everyday commands locally without the AI. |
 | `followUp` | `true` | Open the microphone when Atticus ends on a question. |
 | `safe` | `true` | Sandbox and Allow cards (see Safety). |

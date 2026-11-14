@@ -353,8 +353,11 @@ def main():
                     self._floor = level
                 else:
                     self._floor += (level - self._floor) * 0.02
-                speech_gate = max(0.10, self._floor + 0.07)
-                silence_gate = max(0.075, self._floor + 0.035)
+                # Gates sit just above the room's own noise so a whisper
+                # still counts as speech in a quiet room (the floors used to
+                # be fixed at a normal speaking level).
+                speech_gate = max(0.06, self._floor * 1.6 + 0.035)
+                silence_gate = max(0.045, self._floor * 1.3 + 0.012)
                 if level >= speech_gate:
                     self._speech_seen = True
                     self._silence_since = 0.0

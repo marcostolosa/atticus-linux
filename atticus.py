@@ -5681,7 +5681,7 @@ def system_prompt(risky):
         # The shared prompt is written for macOS. Say what is true here, so the model does not spend steps
         # on AppleScript, `defaults` or a Calendar helper that do not exist on this desktop.
         swaps = (('You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.',
-                  'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked.'),
+                  'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked. The request is a speech transcript, sometimes whispered or said over noise: expect misheard or missing words and wrong verb endings. When the intended request is clear from what this assistant can do and the devices it knows, act on it; when it is not, say what you heard and ask once.'),
                  ("- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.\n",
                   '- This is not a Mac: no AppleScript, osascript, defaults, launchctl or System Settings. Use the tools listed here.\n'),
                  (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',

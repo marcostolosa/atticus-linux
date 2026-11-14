@@ -200,7 +200,7 @@ def _weekday(at: float, repeat: str) -> float:
     return at
 
 
-def find_when(folded: str, now: float, literal: bool = False) -> tuple[When, tuple[int, int]] | None:
+def find_when(folded: str, now: float, literal: bool = False, bare: bool = False) -> tuple[When, tuple[int, int]] | None:
     """The first time expression in the text and the span it covers:
     "daqui a 20 minutos", "amanhã às 9", "às 7 e meia da noite", "todo dia às 8"."""
     m = re.search(rf"\b{_RELATIVE}", folded)
@@ -216,7 +216,7 @@ def find_when(folded: str, now: float, literal: bool = False) -> tuple[When, tup
         marked = bool(re.match(r"(as|a|at|para as|pras|by) ", text) or re.search(r"\d ?(h|horas?|hrs?|o'?clock)\b|:\d\d", text)
                       or m.group("period") or m.group("noon") or m.group("midnight") or m.group("d1") or m.group("d2")
                       or m.group("rep1") or m.group("rep2"))
-        if not marked:
+        if not marked and not bare:   # bare: the caller knows a time is expected here ("me acorda 6 e meia")
             continue
         rep = m.group("rep1") or m.group("rep2") or ""
         repeat = "" if not rep else "weekdays" if re.search(r"semana|uteis|weekdays", rep) else "daily"
@@ -236,6 +236,13 @@ _SET = (r"(?:(?:coloca|coloque|colocar|poe|ponha|por|bota|bote|botar|cria|crie|c
 _ART = r"(?:(?:um|uma|o|a|the|an|a|me|my|meu|minha|novo|nova|new|another|outro|outra) )*"
 _TIMER = r"(?:timer|temporizador|cronometro|contagem regressiva|countdown)"
 _ALARM = r"(?:alarme|despertador|alarm)"
+
+
+_HEARD_AS = {"coloco": "coloca", "ponho": "poe", "boto": "bota", "crio": "cria", "inicio": "inicia", "marco": "marca",
+             "aumento": "aumenta", "abaixo": "abaixa", "baixo": "baixa", "diminuo": "diminui", "ligo": "liga",
+             "desligo": "desliga", "apago": "apaga", "acendo": "acende", "pauso": "pausa", "adiciono": "adiciona",
+             "abro": "abre", "cancelo": "cancela", "tiro": "tira", "limpo": "limpa", "muto": "muta", "pulo": "pula",
+             "deixo": "deixa", "mudo": "muda", "ajusto": "ajusta", "bloqueio": "bloqueia", "anoto": "anota"}
 
 
 def _lang(folded: str) -> str:
@@ -259,6 +266,12 @@ def parse(text: str, now: float | None = None, home: bool | None = None) -> Inte
     t = re.sub(rf" ?{_PLEASE}$", "", t).strip()
     if not t or len(t) > 160:
         return None
+    # Speech recognition often hears the command's last vowel wrong ("coloco um timer" for "coloca um
+    # timer"), most of all in a whisper. A request to the assistant is never "I do X", so a first word
+    # in the first person is read as the command it sounds like.
+    first, _, rest = t.partition(" ")
+    if first in _HEARD_AS:
+        t = _HEARD_AS[first] + (" " + rest if rest else "")
     lang = _lang(t)
     I = lambda kind, **args: Intent(kind, lang, args)
 
@@ -291,7 +304,7 @@ def parse(text: str, now: float | None = None, home: bool | None = None) -> Inte
     m = re.fullmatch(rf"(?:me acorda|me acorde|acorda eu|me desperta|me desperte|wake me(?: up)?) (?P<rest>.+)", t)
     m = m or re.fullmatch(rf"{_SET}?{_ART}{_ALARM} (?P<rest>.+)", t)
     if m:
-        found = find_when(m.group("rest"), now, literal=True)
+        found = find_when(m.group("rest"), now, literal=True, bare=True)
         if found:
             when, (a, b) = found
             left = (m.group("rest")[:a] + " " + m.group("rest")[b:]).strip()
@@ -450,7 +463,7 @@ def parse(text: str, now: float | None = None, home: bool | None = None) -> Inte
     if home:
         # "coloca o ar em 24 graus", "luz da sala em 50%"
         m = re.fullmatch(rf"(?:(?:coloca|coloque|poe|ponha|bota|deixa|deixe|ajusta|ajuste|muda|mude|define|set|put|change) )?"
-                         rf"(?P<name>[\w -]{{2,48}}?) (?:em|para|pra|a|no|at|to) (?P<n>{NUM}) ?(?P<unit>graus|grau|degrees|°c?|%|por cento|percent)", t)
+                         rf"(?P<name>[\w -]{{2,48}}?) (?:em|e|para|pra|a|no|at|to) (?P<n>{NUM}) ?(?P<unit>graus|grau|degrees|°c?|%|por cento|percent)", t)
         if m and not re.search(r"\b(volume|som|brilho|brightness|timer|alarme|tela|screen)\b", m.group("name")):
             n = number(m.group("n"))
             if n is not None:

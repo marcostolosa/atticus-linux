@@ -66,6 +66,26 @@ _KIND = {"luz": "light", "luzes": "light", "lampada": "light", "lampadas": "ligh
          "aspirador": "vacuum", "vacuum": "vacuum", "cena": "scene", "scene": "scene"}
 
 
+def _near(a: str, b: str) -> bool:
+    """Same word, or one letter added, dropped or changed (words of 2+ letters)."""
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 2 or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = j = edits = 0
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            i += 1; j += 1
+        else:
+            edits += 1
+            if edits > 1:
+                return False
+            i, j = (i + 1, j + 1) if len(a) == len(b) else (i, j + 1)
+    return edits + (len(b) - j) + (len(a) - i) <= 1
+
+
 def entities(domain: str = "") -> list[dict]:
     rows = _call("GET", "/api/states") or []
     out = []
@@ -106,6 +126,16 @@ def find(spoken: str, rows: list[dict] | None = None, switchable: bool = True) -
         hits = of_kind
     elif kinds and len(names) == len(words):   # only kind words were said and nothing of that kind exists
         hits = []
+    if len(hits) != 1:
+        # A name heard slightly wrong ("luz do Dó" for "Luz do Dom"): the one device whose whole name
+        # lines up word for word with what was said, allowing one wrong letter per word.
+        said = [w for w in _fold(spoken).split()]
+        while said and said[0] in ("a", "o", "as", "os", "the", "my", "minha", "meu"):
+            said = said[1:]
+        close = [r for r in rows if len(_fold(r["name"]).split()) == len(said) and len(said) >= 2 and
+                 all(_near(a, b) for a, b in zip(said, _fold(r["name"]).split()))]
+        if len(close) == 1:
+            return close
     if len(hits) > 1:
         # Several candidates: the one whose own name carries every word said ("luz do quarto" is
         # "Luz do Quarto", not another light that merely sits in the quarto area) wins outright.

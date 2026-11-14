@@ -192,6 +192,27 @@ class Home(unittest.TestCase):
             self.assertFalse(i and i.kind == "home" and text != "abre o chromium", text)
 
 
+class Misheard(unittest.TestCase):
+    """Real transcripts from a noisy room and from whispering: the action must still be right."""
+
+    def test_last_vowel(self):
+        self.assertEqual(p("Coloco um timer de 10 minutos").args["seconds"], 600)
+        self.assertEqual(p("Abaixo volume").args, {"delta": -10})
+        self.assertEqual(p("Coloco o ar condicionado em 23 graus", home=True).args["value"], 23.0)
+        self.assertEqual(p("Apago a luz do quarto", home=True).args, {"name": "a luz do quarto", "on": False})
+
+    def test_dropped_small_words(self):
+        self.assertEqual(p("Apaga luz do quarto", home=True).args, {"name": "luz do quarto", "on": False})
+        self.assertEqual(p("pausa musica").args, {"action": "pause"})
+        self.assertEqual(p("Me acorda 6 e meia").args["at"], at(15, 6, 30))
+        self.assertEqual(p("me acorda seis e meia").args["at"], at(15, 6, 30))
+        self.assertEqual(p("luz do dom e 30%", home=True).args, {"name": "luz do dom", "what": "brightness", "value": 30.0})
+
+    def test_first_person_does_not_hijack_questions(self):
+        self.assertIsNone(p("abaixo de zero a água congela"))
+        self.assertIsNone(p("ligo para quem em caso de emergência"))
+
+
 class Phrasing(unittest.TestCase):
     def test_when_text(self):
         self.assertEqual(I.when_text(at(14, 15), "pt", NOW), "hoje às 15:00")

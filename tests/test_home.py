@@ -79,6 +79,8 @@ class HomeAssistant(unittest.TestCase):
         self.assertEqual([e["id"] for e in home.find("ar da sala")], ["climate.sala"])
         self.assertEqual(len(home.find("quarto")), 2)            # ambiguous: the caller asks which
         self.assertEqual(home.find("luz da garagem"), [])
+        self.assertEqual([e["id"] for e in home.find("a luz da sola")], ["light.sala"])        # misheard by one letter
+        self.assertEqual([e["id"] for e in home.find("luz do quarta")], ["light.quarto"])
         self.assertEqual(home.find("temperatura da sala"), [])    # a sensor is not switchable
         self.assertEqual(len(home.find("temperatura da sala", switchable=False)), 1)
 

@@ -470,12 +470,32 @@ def parse(text: str, now: float | None = None, home: bool | None = None) -> Inte
                 temp = bool(re.match(r"grau|degree|°", m.group("unit")))
                 if temp and 10 <= n <= 35 or not temp and 1 <= n <= 100:
                     return I("home_set", name=m.group("name").strip(), what="temperature" if temp else "brightness", value=n)
+        # "o ar está ligado?", "a luz do quarto tá acesa", "como está o ar",
+        # "is the kitchen light on". A transcript drops the question mark, so
+        # the statement form is read as the question it almost always is.
+        dev = r"(?P<name>[\w -]{2,48}?)"
+        ms = (re.fullmatch(rf"(?:(?:me )?(?:ve|veja|verifica|verifique|confere|confira|olha|sabe|diz|fala|check|tell me)"
+                           rf"(?: ai| pra mim| para mim)? (?:se |if )?)?(?:(?:o|a|os|as|the) )?{dev} "
+                           rf"(?:esta|estao|ta|tao|ficou|is|are) (?:{_STATE})", t)
+              or re.fullmatch(rf"(?:esta|estao|ta|tao) (?:{_STATE}) (?:(?:o|a|os|as) )?{dev}", t)
+              or re.fullmatch(rf"(?:is|are) (?:the )?{dev} (?:{_STATE})", t)
+              or re.fullmatch(rf"(?:como (?:esta|ta|estao)|qual (?:e )?o estado d[oae]s?|estado d[oae]s?|"
+                              rf"how is|how's|what is the state of|what's the state of) (?:(?:o|a|os|as|the) )?{dev}", t))
+        if ms and not re.search(_NOT_HOME, ms.group("name")):
+            return I("home_state", name=ms.group("name").strip())
+        # "liga" / "pode desligar" right after talking about one device
+        mb = re.fullmatch(r"(?:(?:entao|pode|por favor|sim|isso|ok|please|yes) )*"
+                          r"(?P<verb>liga|ligue|ligar|acende|acenda|acender|desliga|desligue|desligar|apaga|apague|apagar|"
+                          r"turn it on|turn it off|switch it on|switch it off)"
+                          r"(?: (?:ele|ela|isso|ai|entao|por favor|agora|it|please|now))*", t)
+        if mb and _last_device(now):
+            return I("home", name="", on=bool(re.match(r"lig|acend|turn it on|switch it on", mb.group("verb"))))
         m = re.fullmatch(r"(?P<verb>liga|ligue|ligar|acende|acenda|acender|ativa|ative|abre|abra|turn on|switch on|"
                          r"desliga|desligue|desligar|apaga|apague|apagar|desativa|desative|fecha|feche|turn off|switch off) "
                          r"(?P<name>[\w -]{2,48})", t)
         m2 = None if m else re.fullmatch(r"(?:turn |switch )?(?P<name>[\w -]{2,48}) (?P<verb>on|off)", t)
         m = m or m2
-        if m and not re.search(r"\b(computador|pc|computer|tela|screen|pasta|arquivo|file|folder|alarme|timer|lembrete|som|volume)\b", m.group("name")):
+        if m and not re.search(_NOT_HOME, m.group("name")):
             on = bool(re.match(r"lig|acend|ativ|abr|turn on|switch on|on$", m.group("verb")))
             return I("home", name=m.group("name").strip(), on=on)
 
@@ -488,6 +508,26 @@ def parse(text: str, now: float | None = None, home: bool | None = None) -> Inte
         if not joiners & set(name.split()):
             return I("open", name=name)
     return None
+
+
+_STATE = (r"ligad[oa]s?|aces[oa]s?|desligad[oa]s?|apagad[oa]s?|abert[oa]s?|fechad[oa]s?|trancad[oa]s?|destrancad[oa]s?|"
+          r"funcionando|on|off|open|closed|locked|unlocked|running")
+_NOT_HOME = (r"\b(computador|pc|computer|notebook|tela|screen|pasta|arquivo|file|folder|alarme|timer|lembrete|som|volume|"
+             r"wifi|wi-fi|bluetooth|internet|microfone|mic|voce|you|tudo|everything)\b")
+
+# The device the last home command or question was about, so "liga" on its
+# own right after "o ar está ligado?" means that device.
+_LAST: dict = {}
+
+
+def _remember_device(entity: dict) -> None:
+    _LAST.clear()
+    _LAST.update(entity=entity, at=time.time())
+
+
+def _last_device(now: float | None = None, within: float = 120.0) -> dict | None:
+    now = time.time() if now is None else now
+    return _LAST["entity"] if _LAST and 0 <= now - _LAST["at"] <= within else None
 
 
 def _slice(original: str, t0: str, t: str, m: re.Match, group: str) -> str:
@@ -538,6 +578,42 @@ def when_text(at: float, lang: str, now: float | None = None, repeat: str = "") 
     day = "today" if days == 0 else "tomorrow" if days == 1 else _EN_DAYS[lt.tm_wday] if days < 7 else \
         f"{_EN_MONTHS[lt.tm_mon - 1]} {lt.tm_mday}"
     return f"{day} at {clock}"
+
+
+def _state_text(entity: dict, state: str, attrs: dict, pt: bool) -> str:
+    """ "Ar-condicionado está desligado.", "Luz do Quarto está ligada, em 40%." """
+    name, dom = entity["name"], entity["domain"]
+    if state in ("unavailable", "unknown", ""):
+        return f"{name} está fora do ar no Home Assistant." if pt else f"{name} is offline in Home Assistant."
+    if dom == "cover":
+        word = {"open": ("aberta", "open"), "closed": ("fechada", "closed")}.get(state, (state, state))
+    elif dom == "lock":
+        word = {"locked": ("trancada", "locked"), "unlocked": ("destrancada", "unlocked")}.get(state, (state, state))
+    else:
+        off = state in ("off", "idle", "standby", "paused")
+        word = ("desligado", "off") if off else ("ligado", "on")
+        if dom == "light":   # "a luz": feminine, and lit rather than switched
+            word = ("apagada", "off") if off else ("acesa", "on")
+    text = f"{name} está {word[0]}" if pt else f"{name} is {word[1]}"
+    on = word[1] == "on"
+
+    def n(v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        v = int(v) if v.is_integer() else round(v, 1)
+        return str(v).replace(".", ",") if pt else str(v)
+    if dom == "climate":
+        target, room = n(attrs.get("temperature")), n(attrs.get("current_temperature"))
+        if on and target is not None:
+            text += f", em {target} graus" if pt else f", set to {target} degrees"
+        if room is not None:
+            text += f". O ambiente está em {room} graus" if pt else f". The room is at {room} degrees"
+    elif dom == "light" and on and attrs.get("brightness") is not None:
+        text += f", em {round(float(attrs['brightness']) / 255 * 100)}%" if pt else \
+            f", at {round(float(attrs['brightness']) / 255 * 100)}%"
+    return text + "."
 
 
 def run(i: Intent, hush=None) -> str | None:
@@ -660,12 +736,25 @@ def run(i: Intent, hush=None) -> str | None:
         n, key = A.list_clear(a["name"]), A.list_key(a["name"])
         return (f"Lista de {key} limpa." if pt else f"Cleared the {key} list.") if n else \
             (f"A lista de {key} já estava vazia." if pt else f"The {key} list was already empty.")
-    if i.kind == "home":
+    if i.kind == "home_state":
         from . import home as H
         try:
             hits = H.find(a["name"])
             if len(hits) != 1:
                 return None   # unknown or ambiguous: the model lists the devices and asks which
+            now = H.state_of(hits[0]["id"])
+        except H.HomeError as e:
+            return (f"Não consegui falar com a casa: {e}." if pt else f"I couldn't reach the smart home: {e}.")
+        _remember_device(hits[0])
+        return _state_text(hits[0], now["state"], now["attrs"], pt)
+    if i.kind == "home":
+        from . import home as H
+        try:
+            last = None if a["name"] else _last_device()
+            hits = [last] if last else H.find(a["name"]) if a["name"] else []
+            if len(hits) != 1:
+                return None   # unknown or ambiguous: the model lists the devices and asks which
+            _remember_device(hits[0])
             H.switch(hits[0], a["on"])
             if not H.confirm(hits[0], on=a["on"]):
                 return (f"{hits[0]['name']} não respondeu." if pt else f"{hits[0]['name']} did not respond.")

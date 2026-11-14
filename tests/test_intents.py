@@ -228,3 +228,43 @@ class Phrasing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HomeState(unittest.TestCase):
+    """Asking about a device is answered on the spot — and a transcript that
+    lost its question mark is still the question."""
+
+    def test_statement_and_question_forms(self):
+        for said, name in (("O ar está ligado.", "ar"), ("o ar tá ligado?", "ar"),
+                           ("A luz do quarto está acesa?", "luz do quarto"),
+                           ("tá ligada a luz da cozinha", "luz da cozinha"),
+                           ("vê se o ar está ligado", "ar"), ("como está o ar condicionado", "ar condicionado"),
+                           ("Is the bedroom light on?", "bedroom light")):
+            i = I.parse(said, home=True)
+            self.assertIsNotNone(i, said)
+            self.assertEqual((i.kind, i.args["name"]), ("home_state", name), said)
+
+    def test_not_about_the_house(self):
+        for said in ("o computador está ligado", "Você está funcionando?", "o wifi tá ligado"):
+            self.assertIsNone(I.parse(said, home=True), said)
+        self.assertIsNone(I.parse("o ar está ligado", home=False))
+
+    def test_bare_verb_needs_a_recent_device(self):
+        I._LAST.clear()
+        self.assertIsNone(I.parse("liga", home=True))
+        I._remember_device({"id": "climate.ar", "name": "Ar", "domain": "climate", "state": "off"})
+        for said, on in (("liga", True), ("pode ligar", True), ("então desliga ele", False)):
+            i = I.parse(said, home=True)
+            self.assertEqual((i.kind, i.args["name"], i.args["on"]), ("home", "", on), said)
+        self.assertIsNone(I.parse("liga", home=True, now=time.time() + 600))   # long after: not a reply
+        I._LAST.clear()
+
+    def test_state_sentence(self):
+        ac = {"name": "Ar-condicionado", "domain": "climate"}
+        self.assertEqual(I._state_text(ac, "off", {"current_temperature": 31.5}, True),
+                         "Ar-condicionado está desligado. O ambiente está em 31,5 graus.")
+        self.assertEqual(I._state_text(ac, "cool", {"temperature": 18.0}, True),
+                         "Ar-condicionado está ligado, em 18 graus.")
+        lamp = {"name": "Luz do Quarto", "domain": "light"}
+        self.assertEqual(I._state_text(lamp, "on", {"brightness": 128}, True), "Luz do Quarto está acesa, em 50%.")
+        self.assertIn("fora do ar", I._state_text(lamp, "unavailable", {}, True))

@@ -60,11 +60,11 @@ def _piper_model() -> Optional[str]:
     return str(cand) if cand.exists() else None
 
 
-def _player_cmd(rate: int) -> Optional[list]:
+def _player_cmd(rate: int, device: Optional[str] = None) -> Optional[list]:
     """A raw-PCM player: s16le mono at the voice's sample rate."""
     if shutil.which("paplay"):
         return ["paplay", "--raw", f"--rate={rate}", "--channels=1",
-                "--format=s16le"]
+                "--format=s16le", *([f"--device={device}"] if device else [])]
     if shutil.which("pw-cat"):
         return ["pw-cat", "--playback", "--rate", str(rate), "--channels", "1",
                 "--format", "s16", "-"]
@@ -109,8 +109,20 @@ class Speaker:
         self._procs: list[subprocess.Popen] = []
         self._lock = threading.Lock()
         self._voice = None
+        self.echo_free = False      # use_device() routed the voice through echo cancellation
+        self.last_echo_free = False  # ... and the sentence being spoken went that way
         self._voice_failed = False
         self._voice_lock = threading.Lock()
+
+    def use_device(self, sink: str) -> bool:
+        """Play the voice into this sink (the echo-cancelling one, so the
+        microphone can stay open while Atticus talks). Only the piper voice
+        goes through the player this applies to; False means it cannot."""
+        if self._engine != "piper" or not shutil.which("paplay"):
+            return False
+        self._player = _player_cmd(self._rate, sink)
+        self.echo_free = True
+        return True
 
     @property
     def engine(self) -> str:
@@ -149,6 +161,7 @@ class Speaker:
         lang = (language or "").lower()
         use_piper = (self._engine == "piper" and
                      (not lang or lang.startswith("pt") or not self._espeak))
+        self.last_echo_free = bool(use_piper and self.echo_free)
         if use_piper:
             self._speak_piper(words)
         else:

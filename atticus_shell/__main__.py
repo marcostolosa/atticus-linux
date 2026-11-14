@@ -110,6 +110,12 @@ def main():
             self._speaking = False
             # Hands-free answering of an interactive card (choice / permission).
             self._answering = False
+            self._followup = False
+            self._barge_source = 0
+            self._barge_hits = []
+            self._barge_started = 0.0
+            self._barge_peak = 0.0
+            self._aec = False
             self._prompt = None          # {"kind": "pick"|"perm", ...}
             self._answer_tries = 0
             # Bring the hotkey socket up first so it's ready before WebKit finishes init.
@@ -131,6 +137,8 @@ def main():
                 on_prompt=self._on_prompt)
             self.transcriber.warm()
             self.speaker.warm()
+            if cfg.get("bargeIn", True):
+                threading.Thread(target=self._setup_echo, daemon=True).start()
             self._last_answer = ""
             # Timers/alarms/reminders live in systemd transient timers, which a
             # reboot wipes: re-arm what is still ahead and fire what was missed.
@@ -299,9 +307,94 @@ def main():
                 return
             self._begin_listen(wake=True)
 
-        def _begin_listen(self, wake=False):
+        @staticmethod
+        def _log(event, **details):
+            # One line per voice event in the service journal (journalctl
+            # --user -u atticus), so "it ignored me" can be traced afterwards.
+            print("[voice] " + event + "".join(f" {k}={v!r}" for k, v in details.items()), flush=True)
+
+        # --- talking over Atticus ------------------------------------------
+        def _setup_echo(self):
+            # Route the voice through PipeWire's echo canceller, so the mic
+            # can stay open while Atticus speaks and hear only the person.
+            from . import echo
+            if echo.ensure() and self.speaker.use_device(echo.SINK):
+                self._aec = True
+            self._log("echo-cancel", on=self._aec)
+
+        def _arm_barge(self):
+            """Atticus just started speaking: listen for the user talking over
+            it. A voice held for a quarter of a second stops the speech and
+            becomes the next request (or the answer to the card on screen)."""
+            if (not self._aec or not self.speaker.last_echo_free or self.listening
+                    or self._barge_source or not cfg.get("bargeIn", True)):
+                return
+            from . import echo
+            if not self.recorder.start(device=echo.SOURCE):
+                return
+            self._barge_hits = []
+            self._barge_peak = 0.0
+            self._barge_started = time.monotonic()
+            self._barge_source = GLib.timeout_add(60, self._tick_barge)
+
+        def _disarm_barge(self):
+            if not self._barge_source:
+                return
+            GLib.source_remove(self._barge_source)
+            self._barge_source = 0
+            if os.environ.get("ATTICUS_DEBUG"):
+                self._log("not interrupted", loudest=round(self._barge_peak, 3))
+            if not self.listening:
+                try:
+                    self.recorder.stop()
+                except Exception:
+                    pass
+
+        def _tick_barge(self):
+            hits = self._barge_hits
+            self._barge_peak = max(self._barge_peak, self.recorder.level)
+            hits.append(self.recorder.level >= float(cfg.get("bargeLevel", 0.12)))
+            del hits[:-6]
+            # the first moments are the canceller still adapting to the room
+            if time.monotonic() - self._barge_started > 0.5 and sum(hits) >= 4:
+                self._barge_source = 0
+                self._barge_in()
+                return False
+            return True
+
+        def _barge_in(self):
+            self.recorder.keep_last(1.0)     # the words that interrupted, not the echo before them
+            answering = bool(self._prompt and self.bridge.running())
+            self._log("interrupted", answering_card=answering)
+            self._gen += 1                   # the interrupted speech must not reopen the mic when it ends
+            self.speaker.stop()
+            self._speaking = False
+            self._last_answer = ""
+            if not answering:
+                self._prompt = None
+                if self.bridge.running():
+                    self.bridge.cancel()
+            self._cancel_autohide()
+            self.listening = True
+            self._answering = answering
+            self._followup = False
+            self._wake_session = True        # ends on trailing silence
+            self._speech_seen = True
+            self._silence_since = 0.0
+            self._floor = 0.02
+            self._listen_started = time.monotonic()
+            if not answering:
+                self.overlay.call("listen")  # a fresh voice turn
+            self._level_source = GLib.timeout_add(60, self._tick_level)
+
+        def _begin_listen(self, wake=False, followup=False):
             if self.listening:
                 return
+            self._disarm_barge()
+            # followup: the mic opened by itself after an answer. If nobody
+            # speaks it closes without a sound and nothing is transcribed.
+            self._followup = followup
+            self._log("listening", wake=wake, followup=followup)
             # Barge-in: starting a new recording interrupts whatever Atticus is
             # doing right now — speaking an answer, or waiting on an interactive
             # card from a now-abandoned ask — so the mic never records its own
@@ -371,8 +464,11 @@ def main():
                         self._end_listen()
                         return False
                 # Nothing said after the keyword: don't hang open.
-                if not self._speech_seen and now - self._listen_started > 5:
-                    self._end_listen()
+                if not self._speech_seen and now - self._listen_started > (float(cfg.get("followUpSeconds", 3)) if self._followup else 5):
+                    if self._followup:
+                        self._close_followup()
+                    else:
+                        self._end_listen()
                     return False
                 if now - self._listen_started > 12:   # hard cap
                     self._end_listen()
@@ -393,6 +489,16 @@ def main():
                 return self.recorder.stop()
             except Exception:
                 return None
+
+        def _close_followup(self):
+            # The follow-up window passed in silence: back to the wake word,
+            # with no blip and without sending room noise to be transcribed.
+            self._stop_recording()
+            self._followup = False
+            self._log("follow-up closed: silence")
+            self.overlay.call("msg", "")
+            self._resume_wake()
+            self._schedule_autohide()
 
         def _end_listen(self):
             if not self.listening:
@@ -421,6 +527,7 @@ def main():
             if gen != self._gen:
                 return False   # superseded by a newer session or a cancel; drop it
             text = (text or "").strip()
+            self._log("heard", text=text, by=self.transcriber.last_engine)
             if not text:
                 self.overlay.call("msg", "")
                 self._resume_wake()   # nothing heard: go back to waiting for the keyword
@@ -441,14 +548,18 @@ def main():
             self._speaking = True
             self._speak_gen = self._gen   # tag this playback to the current turn
             self._last_answer = text
+            self._log("answer", text=text[:200])
             self.speaker.speak(text, self.transcriber.last_language,
                                done=self._on_speech_done)
+            self._arm_barge()
 
         def _on_speech_done(self):
             # Runs on the TTS watcher thread; hop back to the GLib main thread.
             GLib.idle_add(self._speech_finished)
 
         def _speech_finished(self):
+            if self._speak_gen == self._gen:
+                self._disarm_barge()
             self._speaking = False
             if self._speak_gen != self._gen:
                 # A cancel or a new _begin_listen happened while this answer
@@ -460,10 +571,15 @@ def main():
                 # Conversation mode: when Atticus ends on a question, open the
                 # mic for the reply instead of making the user say the wake
                 # word again. Trailing silence closes it, as after the keyword.
+                # Conversation mode: after an answer the mic opens again for a
+                # few seconds, so a reply ("liga", "e a da cozinha?") needs no
+                # wake word. followUp: "always" (default), "question" (only
+                # when the answer ends on a question) or false.
+                mode = cfg.get("followUp", "always")
                 asked = self._last_answer.rstrip().rstrip("*_`)\"” ").endswith("?")
-                self._last_answer = ""
-                if asked and cfg.get("followUp", True) and not self.listening:
-                    self._begin_listen(wake=True)
+                spoke, self._last_answer = bool(self._last_answer), ""
+                if mode and not self.listening and (asked or (spoke and mode in (True, "always"))):
+                    self._begin_listen(wake=True, followup=True)
                     return False
                 self._resume_wake()
                 self._schedule_autohide()
@@ -538,6 +654,7 @@ def main():
         def _instant_done(self, text, intent, reply, gen):
             if gen != self._gen:
                 return False   # cancelled or superseded while it ran
+            self._log("instant", kind=intent.kind, reply=reply)
             if reply is None:
                 self._ask_brain(text)   # could not do it locally after all
                 return False
@@ -549,8 +666,10 @@ def main():
             self.overlay.call("line", "✓ " + reply)
             self._speaking = True
             self._speak_gen = self._gen
-            self._last_answer = ""
+            # a state answer invites a reply ("liga"); a plain confirmation does not
+            self._last_answer = reply if intent.kind == "home_state" or reply.rstrip().endswith("?") else ""
             self.speaker.speak(reply, intent.lang, done=self._on_speech_done)
+            self._arm_barge()
             return False
 
         def _ask_brain(self, text):
@@ -559,6 +678,7 @@ def main():
 
         def _cancel(self):
             self._gen += 1   # invalidate any transcription still in flight
+            self._disarm_barge()
             self._stop_recording()
             self.speaker.stop()
             self._speaking = False
@@ -593,6 +713,7 @@ def main():
             # If voice is off or unavailable the callback still fires, so the
             # mic opens right away and the card can be answered by voice or click.
             self.speaker.speak(text, lang, done=after)
+            self._arm_barge()
 
         def _prompt_speech(self, p, first):
             en = str(self.transcriber.last_language or cfg.get("asrLanguage", "")).lower().startswith("en")
@@ -622,7 +743,10 @@ def main():
 
         def _begin_answer_listen(self):
             # Open the mic to hear the answer to the pending card.
-            if not self._prompt or self.listening or not self.bridge.running():
+            if self.listening:
+                return False     # the user already talked over the question
+            self._disarm_barge()
+            if not self._prompt or not self.bridge.running():
                 return False
             self._gen += 1
             if self.wake:
@@ -631,6 +755,7 @@ def main():
                 return False   # no mic: leave the card for clicking
             self.listening = True
             self._answering = True
+            self._followup = False
             self._wake_session = True    # reuse trailing-silence endpointing
             self._speech_seen = False
             self._silence_since = 0.0
@@ -642,6 +767,7 @@ def main():
 
         def _stop_answer_listen(self):
             # A panel click (or giving up) ends any in-flight answer listen.
+            self._disarm_barge()
             self._stop_recording()
             self._answering = False
             self._prompt = None
@@ -665,7 +791,13 @@ def main():
                 self._resume_wake()
                 self._schedule_autohide()
                 return False
-            value = self._match_answer(p, (text or "").strip())
+            said = (text or "").strip()
+            value = self._match_answer(p, said)
+            self._log("card answer", heard=said, matched=value)
+            if value is None and p["kind"] != "perm" and said:
+                # Not one of the options, but the user did say something:
+                # that is their answer in their own words ("liga o ar").
+                value = "=" + said[:300]
             if value is None:
                 # Not understood: say so and listen again a couple of times,
                 # then fall back to the panel buttons (still on screen).

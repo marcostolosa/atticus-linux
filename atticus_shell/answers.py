@@ -1,8 +1,8 @@
 """Map a spoken reply to the answer of an on-screen card.
 
 Permission cards take yes / no; choice cards take a number, an ordinal or
-words from an option's label. Unclear replies return None so the caller asks
-again instead of guessing — and for a permission, anything that sounds like a
+words from an option's label. Unclear replies return None — the caller asks a
+permission again, and takes a choice reply as the user's own words — and for a permission, anything that sounds like a
 refusal wins over anything that sounds like consent.
 """
 from __future__ import annotations
@@ -76,13 +76,14 @@ def match(p, text, lang=""):
     # Fuzzy: the option whose label shares the most content words
     # (stopwords excluded) with the reply.
     content = words - _STOPWORDS
-    best, best_score = None, 0
-    for i, o in enumerate(opts):
+    scores = []
+    for o in opts:
         label = set(re.sub(r"[^\w\s]", " ", plain(o).lower()).split())
-        label -= _STOPWORDS
-        score = len(label & content)
-        if score > best_score:
-            best, best_score = i, score
-    if best is not None and best_score >= 1:
-        return str(best)
+        scores.append(len((label - _STOPWORDS) & content))
+    best = max(scores, default=0)
+    # One option must stand out, and most of what was said must be in it:
+    # "liga o ar" against "Verificar o ar" / "Desligar o ar" is neither of
+    # them — it is the user's own answer, which the caller passes on as said.
+    if best >= 1 and scores.count(best) == 1 and best * 2 >= len(content):
+        return str(scores.index(best))
     return None

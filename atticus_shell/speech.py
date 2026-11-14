@@ -23,9 +23,10 @@ from .settings import get as _setting
 SAMPLE_RATE = 16000
 
 
-def _record_cmd() -> Optional[list[str]]:
+def _record_cmd(device: Optional[str] = None) -> Optional[list[str]]:
     if shutil.which("parecord"):
-        return ["parecord", "--raw", f"--rate={SAMPLE_RATE}", "--channels=1", "--format=s16le"]
+        return ["parecord", "--raw", f"--rate={SAMPLE_RATE}", "--channels=1", "--format=s16le",
+                *([f"--device={device}"] if device else [])]
     if shutil.which("pw-record"):
         return ["pw-record", "--rate", str(SAMPLE_RATE), "--channels", "1",
                 "--format", "s16", "--raw", "-"]
@@ -52,10 +53,10 @@ class Recorder:
     def available(self) -> bool:
         return _record_cmd() is not None
 
-    def start(self) -> bool:
+    def start(self, device: Optional[str] = None) -> bool:
         if self._running:
             return True
-        cmd = _record_cmd()
+        cmd = _record_cmd(device)
         if not cmd:
             return False
         try:
@@ -78,9 +79,15 @@ class Recorder:
             self._chunks.append(data)
             samples = np.frombuffer(data, dtype=np.int16)
             if samples.size:
-                rms = float(np.sqrt(np.mean((samples.astype(np.float32) / 32768.0) ** 2)))
+                rms = voice_rms(samples.astype(np.float32) / 32768.0)
                 # Perceptual-ish scaling so quiet speech still moves the orb.
                 self._level = min(1.0, rms * 4.0)
+
+    def keep_last(self, seconds: float) -> None:
+        """Forget all but the most recent audio (what came before was only
+        being watched for a voice, not recorded for its words)."""
+        keep = max(1, int(seconds * SAMPLE_RATE * 2 / 2048))
+        del self._chunks[:-keep]
 
     def stop(self) -> np.ndarray:
         self._running = False
@@ -100,6 +107,29 @@ class Recorder:
         if not pcm:
             return np.zeros(0, dtype=np.float32)
         return np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+RUMBLE_HZ = 150   # fans and air conditioners live below this; voices do not
+
+
+def voice_rms(samples: np.ndarray) -> float:
+    """Loudness of one short chunk counting only the band voices use. An air
+    conditioner puts several times more energy into the microphone than a
+    quiet voice does, nearly all of it as low rumble; measured across the
+    whole band, that rumble reads as speech and a whisper as nothing."""
+    n = samples.size
+    if n < 64:
+        return float(np.sqrt(np.mean(samples ** 2))) if n else 0.0
+    power = np.abs(np.fft.rfft(samples)) ** 2
+    first = int(np.ceil(RUMBLE_HZ * n / SAMPLE_RATE))
+    return float(np.sqrt(2.0 * power[first:].sum()) / n)
+
+
+# The rumble is cut only for measuring loudness. The recognizer gets the
+# recording as it is: on real recordings mixed with real air-conditioner
+# noise, every cleaning tried before Whisper (rumble cut, voice band-pass,
+# a neural denoiser) made it understand fewer commands than leaving the
+# noise in, as studies of denoising in front of Whisper also report.
 
 
 def level_audio(audio: np.ndarray, target: float = 0.25) -> np.ndarray:

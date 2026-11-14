@@ -139,7 +139,10 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `sttRemote` | `"auto"` | Use the Home Assistant server's Whisper service for speech recognition when `haUrl`/`haToken` are set (usually a larger model on a stronger machine: faster and far better with whispers). Falls back to the local model. `"off"` keeps it local. |
 | `sttEntity` | auto | Which `stt.*` entity to use on that server. |
 | `instant` | `true` | Run everyday commands locally without the AI. |
-| `followUp` | `true` | Open the microphone when Atticus ends on a question. |
+| `followUp` | `"always"` | After an answer, open the microphone again so a reply needs no wake word. `"question"`: only when Atticus ends on a question. `false`: never. |
+| `followUpSeconds` | `3` | How long that follow-up waits for a voice before closing in silence. |
+| `bargeIn` | `true` | Keep listening while Atticus speaks (through PipeWire echo cancellation) so talking over it stops the speech and is taken as the next request. |
+| `bargeLevel` | `0.12` | How loud a voice must be to interrupt. Lower it if talking over Atticus is not noticed. |
 | `safe` | `true` | Sandbox and Allow cards (see Safety). |
 | `haUrl`, `haToken` | unset | Home Assistant address and a long-lived access token, for smart-home control. |
 | `micFix` | `true` | Set a sane capture volume at startup. |

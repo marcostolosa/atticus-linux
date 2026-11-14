@@ -42,3 +42,17 @@ class Choice(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnWords(unittest.TestCase):
+    AC = {"kind": "pick", "options": ["Verificar o estado do ar-condicionado", "Desligar o ar-condicionado",
+                                      "Não fazer nada, era só um aviso"]}
+
+    def test_reply_that_is_no_option(self):
+        for t in ("liga", "liga o ar condicionado", "é pra ligar o ar"):
+            self.assertIsNone(match(self.AC, t, "pt"), t)
+
+    def test_reply_that_names_an_option(self):
+        self.assertEqual(match(self.AC, "desligar", "pt"), "1")
+        self.assertEqual(match(self.AC, "verificar o estado", "pt"), "0")
+        self.assertEqual(match(self.AC, "a segunda", "pt"), "1")

@@ -161,3 +161,9 @@ class OneDesktop(unittest.TestCase):
         with open(ME) as f:
             self.assertNotIn("sys.platform", f.read())
 
+    def test_nothing_is_called_that_no_longer_exists(self):
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        from undefined_names import undefined
+        with open(ME) as f:
+            self.assertEqual(undefined(f.read()), [])
+

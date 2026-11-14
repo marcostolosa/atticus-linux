@@ -155,3 +155,9 @@ class Windows(unittest.TestCase):
         self.assertFalse(self.brain.focus_command("open -g https://example.com"))
         self.assertFalse(self.brain.focus_command("ls -la"))
 
+
+class OneDesktop(unittest.TestCase):
+    def test_no_second_code_path_for_another_system(self):
+        with open(ME) as f:
+            self.assertNotIn("sys.platform", f.read())
+

@@ -520,31 +520,18 @@ def local_servers():
 SHOT = '/tmp/atticus-screen'   # + -<n>.jpg, one per display
 os.environ['PATH'] = f"/opt/homebrew/bin:/usr/local/bin:{HOME}/.local/bin:{HOME}/.claude/local:/usr/bin:/bin:/usr/sbin:" + os.environ.get('PATH', '')
 INNER = bool(os.environ.get('ATTICUS_ASK'))   # started by the AI's own tool call, not by the user
-APP = os.environ.get('ATTICUS_APP') or os.path.join(HOME, 'Applications/Atticus.app/Contents/MacOS/Atticus')   # set by Atticus.app
+APP = os.environ.get('ATTICUS_APP') or os.path.join(os.path.dirname(ME), 'bin', 'atticus-native')   # set by Atticus.app
 
-# Tool descriptions that differ by platform: macOS targets controls by their
-# accessibility label (AX API); Linux has no accessibility tree reliable
-# enough across GTK/Qt/Electron/terminal apps on this stack to do the same,
-# so native actions there go by pixel coordinate read off a {LOOK} picture
-# instead — the same pattern the existing Pointer feature already uses.
-if sys.platform == 'darwin':
-    _WEB_TOOL = (f'- Web actions: {WEB} click <n> | fill <n> "<text>" | type-after "<exact anchor>" "<text>"; numbers come from the window read. '
-                 'Each returns changed page state; check it.\n')
-    _HANDS_TOOL = (f'- Native actions: {HANDS} see [app] | menu <app> "<path>" | click <target> [near <label>] [double] [right] | '
-                   'scroll down|up|left|right [pages|all] [target] | scroll-to "text" | press "cmd+t" [times] | drag <from> <to> | '
-                   'type <field> "text" [submit] [append] | type-after "<exact anchor>" "<text>" | wait [seconds]. Prefer labels. '
-                   'Returns changed state; read documents with the window reader.\n')
-    _PLACE_NOTE = 'full maximizes; fullscreen enters a Space.'
-else:
-    _WEB_TOOL = (f'- Web pages, in Atticus\'s own browser window (separate from the user\'s everyday browser, so a site may need signing in there once): '
-                 f'{WEB} read <url> opens a page and prints its text with numbered controls | read (again, after a change) | click <n> | fill <n> "<text>" | type-after "<exact anchor>" "<text>". '
-                 'Numbers come from the last read. Prefer this to pictures and mouse clicks for anything on a website.\n')
-    _HANDS_TOOL = (f'- Mouse and keyboard, at a place on the screen: {HANDS} click <x> <y> "<what is there>" [double] [right] | '
-                   'type "<text>" | press "<combo>" [times] ["<what it does>"] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right <x> <y> [amount] (the position scrolls, same as a real wheel) | '
-                   f'drag <x1> <y1> <x2> <y2> "<what is moved where>". The quoted words are shown and read aloud to the user when they are asked to allow it, so name the thing in their language as they would '
-                   f'("botão Entrar", "campo de e-mail do Instagram"), never coordinates. Read a fresh {LOOK} picture first and act on exactly the coordinates it shows; a stale picture is a '
-                   'wrong click. Returns changed state; read documents with the window reader.\n')
-    _PLACE_NOTE = 'full maximizes; fullscreen is the same as full (no separate Space on Linux).'
+# How the model is told to use a website, the mouse and keyboard, and window placement.
+_WEB_TOOL = (f'- Web pages, in Atticus\'s own browser window (separate from the user\'s everyday browser, so a site may need signing in there once): '
+             f'{WEB} read <url> opens a page and prints its text with numbered controls | read (again, after a change) | click <n> | fill <n> "<text>" | type-after "<exact anchor>" "<text>". '
+             'Numbers come from the last read. Prefer this to pictures and mouse clicks for anything on a website.\n')
+_HANDS_TOOL = (f'- Mouse and keyboard, at a place on the screen: {HANDS} click <x> <y> "<what is there>" [double] [right] | '
+               'type "<text>" | press "<combo>" [times] ["<what it does>"] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right <x> <y> [amount] (the position scrolls, same as a real wheel) | '
+               f'drag <x1> <y1> <x2> <y2> "<what is moved where>". The quoted words are shown and read aloud to the user when they are asked to allow it, so name the thing in their language as they would '
+               f'("botão Entrar", "campo de e-mail do Instagram"), never coordinates. Read a fresh {LOOK} picture first and act on exactly the coordinates it shows; a stale picture is a '
+               'wrong click. Returns changed state; read documents with the window reader.\n')
+_PLACE_NOTE = 'full maximizes; fullscreen is the same as full (no separate Space on Linux).'
 
 SYSTEM = f"""You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.
 Stable facts: answer only if sure. Current facts: search once; prefer dated primary sources. Never invent. Batch independent work.
@@ -653,7 +640,7 @@ RISKY = [('Delete something?', r'\b(rm|rmdir|srm|unlink|shred|trash|mv)\s|\bdele
 # Atticus.swift's riskyPattern: a raw System Events click asks for the same controls --hands does
 RISKY_LABEL = r"(?i)\b(buy|purchase|pay|payment|checkout|order|send|delete|remove|trash|submit|publish|post|sign.?out|log.?out|unsubscribe|subscribe|transfer|bid|erase|withdraw|donate|authorize|grant access|allow access|logout|book|reserve|merge|deploy|discard|wipe|format|apply(?! filters| changes| settings| coupon| code| promo| discount| theme| style| formatting)|confirm)\b"
 RUNS = ('.command', '.tool', '.terminal', '.sh', '.zsh', '.bash', '.app', '.workflow', '.action')   # macOS runs these when opened
-if sys.platform != 'darwin': RUNS += ('.desktop', '.appimage', '.run', '.fish', '.py', '.pl', '.rb', '.jar')
+RUNS += ('.desktop', '.appimage', '.run', '.fish', '.py', '.pl', '.rb', '.jar')
 APP_DIRS = ('/Applications/', '/System/Applications/', os.path.join(HOME, 'Applications') + '/')
 QUIET = (DRAW, SEARCH, READ, LOOK, FRONT, SHOW, PLACE, PLAY, QUEUE, TYPE, REMEMBER, FORGET, ABOUT, PICK, SET, WEB, HISTORY, HANDS, WINDOW, f'{shlex.quote(ME)} --calendar ', 'open ', 'mdfind ', 'pbpaste')   # helpers confirm their own risky actions
 
@@ -875,7 +862,7 @@ def gate():
         '--calendar' in tokens and any(t == APP or os.path.basename(t) in ('Atticus', 'Atticus-real') for t in tokens[:tokens.index('--calendar')])):
         decision(False, 'Use atticus.py --hands or --calendar; native actions and safety overrides are not model tools.')
         return
-    if sys.platform != 'darwin' and not external and not os.environ.get('ATTICUS_AGENT'):
+    if not external and not os.environ.get('ATTICUS_AGENT'):
         return linux_gate(event, inp, cmd)
     q = '' if agent_approved or trusted_read else risky(cmd) or ('Run outside the safe folder?' if inp.get('dangerouslyDisableSandbox') or external and cmd else '')
     if not q or not os.environ.get('ATTICUS_ASK') or not pref('safe', True):
@@ -2180,10 +2167,7 @@ def move_target(t):
 
 
 def image_pixels(path):
-    """[width, height] of an image file, as strings. ffprobe on Linux, sips on macOS."""
-    if sys.platform == 'darwin':
-        size = subprocess.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path], capture_output=True, text=True).stdout or ''
-        return re.findall(r'pixel(?:Width|Height): (\d+)', size)
+    """[width, height] of an image file, as strings (ffprobe)."""
     try:
         out = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                               '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', path],
@@ -2216,9 +2200,6 @@ def look(cleanup=True, window=None):
             r = subprocess.run([APP, '--look', str(i), path] + ([str(window['windowID'])] if i == home else []), capture_output=True, text=True)
         except FileNotFoundError:
             r = subprocess.CompletedProcess([APP], 1, stdout='')
-        if r.returncode and sys.platform == 'darwin':   # Linux has no screencapture/sips; a failed --look just drops this screen
-            subprocess.run(['screencapture', '-x', '-D', str(i), '-t', 'jpg', path])
-            subprocess.run(['sips', '-Z', '1280', '-s', 'formatOptions', '70', path], capture_output=True)
         s = scr[i - 1]
         painted = f', {window.get("app")} "{window.get("window")}" painted where it sits' + ('' if window.get('visible') else ' (hidden from the user)') if i == home and 'window' in r.stdout.split() else ''
         return path, f'Screen {i}: "{s[0]}" ({"built-in laptop screen" if s[5] else "external monitor"}{painted}; click spots as {i}:x,y in picture pixels)'
@@ -2718,7 +2699,7 @@ def hands_label(s):
         return f'{verb} {a[1]}'
     if a[0] == 'press':
         return f'{verb} ' + ''.join(KEYS.get(k.lower(), k.upper() if len(k) == 1 else k.capitalize()) for k in a[1].split('+'))
-    if sys.platform != 'darwin' and a[0] in ('click', 'drag'):   # here the target is a place plus its name: show the name
+    if a[0] in ('click', 'drag'):   # the target is a place plus its name: show the name
         named = ' '.join(w for w in a[3 if a[0] == 'click' else 5:] if w.lower() not in ('double', 'right'))
         return f'{verb} “{named[:60]}”' if named else verb
     return f'{verb} “{hands_name(a[1])[:60]}”'
@@ -5191,27 +5172,24 @@ LINUX_TOOLS = f"""- Timers, alarms, reminders (they ring, notify and speak by th
 def system_prompt(risky):
     """The Atticus system prompt: the shared helpers and reply protocol, plus this client's risky-action rule."""
     system = SYSTEM.replace('NEVER_RISKY', risky)
-    if sys.platform != 'darwin':
-        # Lines of the base prompt that name tools this desktop does not have are put in terms of the ones it has.
-        swaps = (('You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.',
-                  'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked. The request is a speech transcript, sometimes whispered or said over noise: expect misheard or missing words and wrong verb endings. When the intended request is clear from what this assistant can do and the devices it knows, act on it; when it is not, say what you heard and ask once. Transcripts lose question marks: a statement about the state of a device or of the computer ("o ar está ligado") is a question, so check and answer it. Never show a choice card to ask what the user meant when you can check for yourself or one reading is the likely one; keep choice cards for real alternatives, with short options. The user may answer a card in their own words instead of an option: then do what they said.'),
-                 ("- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.\n",
-                  '- System settings: the tools listed here first; else a shell command the user approves on the Allow card; verify.\n'),
-                 (' People: --contacts "<name/relationship>" or the app address book; missing/ambiguous: choices, never guess.',
-                  ' People: there is no address book to read here; ask who is meant when it is not clear, never guess.'),
-                 (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',
-                  ' There is no calendar helper on this system: use --remind for things to be reminded of, and say so if a real calendar event was asked for.'),
-                 (f'- Spotify: {PLAY} "<name>" plays; {QUEUE} "<track>" queues.\n',
-                  f'- Music by name: {PLAY} "<song, artist, album or playlist>" [mix] plays it (the Spotify app when installed, else its sound from YouTube); mix lines up more like it. {QUEUE} "<track>" adds one after it. Pause/next/stop: --media.\n' + LINUX_TOOLS),
-                 ('Open Atticus Settings: open -a Atticus. ', 'Atticus settings live in ~/.config/atticus/settings.json. '),
-                 ('- App/site: always try; never blame sandbox/Terminal. Name the denied Settings switch.\n', '- App/site: always try.\n'))
-        for old, new in swaps:
-            if old not in system: raise RuntimeError('Linux prompt swap no longer matches the shared prompt: ' + old[:50])
-            system = system.replace(old, new)
-        if LINUX_TOOLS not in system: raise RuntimeError('Linux tools missing from the prompt')
-        linux = True
-    else:
-        linux = False
+    # Lines of the base prompt that name tools this desktop does not have are put in terms of the ones it has.
+    swaps = (('You are Atticus, a Mac helper in a small box. The user holds a hotkey, talks, then lets go.',
+              'You are Atticus, a voice assistant on a Linux desktop (Hyprland/Wayland), in a small box. The user says a wake word or presses a hotkey and talks; your final answer is read aloud, so write it to be heard: plain sentences, no lists, tables or URLs unless asked. The request is a speech transcript, sometimes whispered or said over noise: expect misheard or missing words and wrong verb endings. When the intended request is clear from what this assistant can do and the devices it knows, act on it; when it is not, say what you heard and ask once. Transcripts lose question marks: a statement about the state of a device or of the computer ("o ar está ligado") is a question, so check and answer it. Never show a choice card to ask what the user meant when you can check for yourself or one reading is the likely one; keep choice cards for real alternatives, with short options. The user may answer a card in their own words instead of an option: then do what they said.'),
+             ("- System settings: shell, defaults or AppleScript first; else open the pane with --bg and use hands on its labelled control; verify. Don't renavigate an open pane.\n",
+              '- System settings: the tools listed here first; else a shell command the user approves on the Allow card; verify.\n'),
+             (' People: --contacts "<name/relationship>" or the app address book; missing/ambiguous: choices, never guess.',
+              ' People: there is no address book to read here; ask who is meant when it is not clear, never guess.'),
+             (' Calendar (any language): --calendar --help for JSON list/add/move/delete; always use it (picks ambiguous events, confirms edits).',
+              ' There is no calendar helper on this system: use --remind for things to be reminded of, and say so if a real calendar event was asked for.'),
+             (f'- Spotify: {PLAY} "<name>" plays; {QUEUE} "<track>" queues.\n',
+              f'- Music by name: {PLAY} "<song, artist, album or playlist>" [mix] plays it (the Spotify app when installed, else its sound from YouTube); mix lines up more like it. {QUEUE} "<track>" adds one after it. Pause/next/stop: --media.\n' + LINUX_TOOLS),
+             ('Open Atticus Settings: open -a Atticus. ', 'Atticus settings live in ~/.config/atticus/settings.json. '),
+             ('- App/site: always try; never blame sandbox/Terminal. Name the denied Settings switch.\n', '- App/site: always try.\n'))
+    for old, new in swaps:
+        if old not in system: raise RuntimeError('Linux prompt swap no longer matches the shared prompt: ' + old[:50])
+        system = system.replace(old, new)
+    if LINUX_TOOLS not in system: raise RuntimeError('Linux tools missing from the prompt')
+    linux = True
     if pref('workIn', 'back') == 'front':
         system = system.replace('Work behind: never activate/raise unless asked to open/show/switch/focus.', 'Work in front: bring apps/pages forward only when not frontmost.').replace('pictures that window in place, even covered; raises only if asked.', 'to bring the working app forward.')
     if client() == 'claude' and not server() and not linux:   # background agents are not wired into the Linux shell
@@ -7394,7 +7372,7 @@ def main():
         return posthog('support', {'action': 'clicked', 'from': args[2] if args[2] in ('overlay', 'setup', 'settings', 'menu') else 'other'})
     if len(args) == 4 and args[:2] == ['--telemetry', 'idea'] and args[2] in ('shown', 'clicked') and args[3].isdigit():   # "Ideas when I'm away": which one, never its text
         return posthog('idea', {'action': args[2], 'index': int(args[3])})
-    if sys.platform != 'darwin' and args[:1] and args[0] in LINUX_NATIVE:   # timers, alarms, reminders, media, volume…: the native helper does them
+    if args[:1] and args[0] in LINUX_NATIVE:   # timers, alarms, reminders, media, volume…: the native helper does them
         return sys.exit(subprocess.run([APP, *args]).returncode)
     if args == ['--draw', '--help']:
         return print(DRAW_HELP if pref('draw', True) else 'Screen drawings are off')
@@ -7549,7 +7527,7 @@ def main():
                 print('not_done: ' + GONE); sys.exit(1)
             pin = {'env': {**env, 'ATTICUS_HANDS_STATE': hands_state()}}
         r = subprocess.run([APP, '--type'], input=' '.join(args[1:]), capture_output=True, text=True, **pin)
-        print(r.stdout.strip() or ('Could not type: neither wtype nor ydotool is set up (see README).' if sys.platform != 'darwin' else 'Could not type. Rebuild Atticus and allow Accessibility.'))
+        print(r.stdout.strip() or 'Could not type: neither wtype nor ydotool is set up (see README).')
         if r.returncode:
             sys.exit(r.returncode)
         return

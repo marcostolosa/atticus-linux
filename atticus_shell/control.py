@@ -11,6 +11,7 @@ Hyprland binds send one-word commands to it:
 This gives true hold-to-talk through the compositor. Commands:
     press | release | toggle | cancel | ask <text> | ping
     dictate | dictate-press | dictate-release | dictate-text <text>   (typed at the cursor)
+    settings | quit
     hide-for-capture | show-after-capture   (cli.py, around a --look/--text grab)
 """
 from __future__ import annotations

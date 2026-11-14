@@ -40,3 +40,17 @@ def set(key: str, value) -> bool:
         return True
     except OSError:
         return False
+
+
+def migrate_wake_word_keys() -> None:
+    """One-time fixup: before the Settings window existed, "wake" held the
+    on/off switch and "wakeWord" held the word itself. The Settings window
+    (ported from the Mac app, which already had this split) uses "wakeWord"
+    for on/off and "wakeWordName" for the word — matching names, swapped
+    meaning. Without this, opening the window once and saving anything would
+    silently replace a real word like "siri" with a plain True/False. Runs
+    once at startup; harmless (a no-op) once "wakeWordName" exists."""
+    data = all()
+    if isinstance(data.get("wakeWord"), str) and "wakeWordName" not in data:
+        set("wakeWordName", data["wakeWord"])
+        set("wakeWord", bool(data.get("wake", True)))

@@ -71,8 +71,46 @@ _BUTTON = {"left": 0x00, "right": 0x01, "middle": 0x02}
 DOWN, UP = 0x40, 0x80
 
 
+def _cursor_pos() -> tuple[int, int] | None:
+    try:
+        r = subprocess.run(["hyprctl", "cursorpos"], capture_output=True, text=True, timeout=2)
+        if r.returncode:
+            return None
+        x, y = r.stdout.strip().split(",")
+        return int(x.strip()), int(y.strip())
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+_AXIS_SCALE: tuple[float, float] | None = None   # measured once per process; see _axis_scale()
+
+
+def _axis_scale() -> tuple[float, float]:
+    """ydotool's absolute positioning does not always land 1:1 on Hyprland's
+    own pixel coordinates (confirmed live on a scale-1.5 laptop panel: asking
+    for x lands the pointer at 2x, clamped at the screen edge — a mismatch
+    between the virtual input device's absolute axis range and Hyprland's,
+    unrelated to the display's HiDPI scale number itself). The true ratio
+    isn't a fixed constant, so instead of hardcoding one it is measured: move
+    to a small, always-on-screen probe point and see where Hyprland says the
+    pointer actually went. Picture coordinates ({LOOK}) and hyprctl's own
+    coordinates (window positions) are both in the space this corrects to."""
+    global _AXIS_SCALE
+    if _AXIS_SCALE is not None:
+        return _AXIS_SCALE
+    probe = 32
+    if not _ydotool("mousemove", "--absolute", "-x", str(probe), "-y", str(probe))[0]:
+        _AXIS_SCALE = (1.0, 1.0)
+        return _AXIS_SCALE
+    time.sleep(0.05)
+    pos = _cursor_pos()
+    _AXIS_SCALE = (pos[0] / probe, pos[1] / probe) if pos and pos[0] > 0 and pos[1] > 0 else (1.0, 1.0)
+    return _AXIS_SCALE
+
+
 def move(x: int, y: int) -> tuple[bool, str]:
-    return _ydotool("mousemove", "--absolute", "-x", str(int(x)), "-y", str(int(y)))
+    sx, sy = _axis_scale()
+    return _ydotool("mousemove", "--absolute", "-x", str(round(x / sx)), "-y", str(round(y / sy)))
 
 
 def click(x: int, y: int, button: str = "left", double: bool = False) -> tuple[bool, str]:

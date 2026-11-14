@@ -84,6 +84,7 @@ def main():
             self.app = app
             self.listening = False
             self._level_source = 0
+            cfg.migrate_wake_word_keys()
             self._fix_mic_gain()
             self._wake_session = False
             self._speech_seen = False
@@ -120,6 +121,7 @@ def main():
             self._barge_peak = 0.0
             self._aec = False
             self._prompt = None          # {"kind": "pick"|"perm", ...}
+            self._settings = None
             self._answer_tries = 0
             # Bring the hotkey socket up first so it's ready before WebKit finishes init.
             self.control = ControlServer(self._on_control)
@@ -160,8 +162,8 @@ def main():
 
             # Wake word ("Atticus"), like Alexa — always listening, off by default.
             self.wake = None
-            if cfg.get("wake", False):
-                word = cfg.get("wakeWord") or "atticus"
+            if cfg.get("wakeWord", False):   # settings.json key names match the Settings window: wakeWord (on/off), wakeWordName (the word)
+                word = cfg.get("wakeWordName") or "atticus"
                 self.wake = WakeListener(self._on_wake, word=word)
                 if self.wake.available():
                     self.wake.start()
@@ -300,6 +302,10 @@ def main():
             elif cmd == "dictate-text" and arg:   # text from elsewhere: tidy it and type it
                 self._gen += 1
                 threading.Thread(target=self._dictate_finish, args=(None, self._gen, arg), daemon=True).start()
+            elif cmd == "settings":
+                self._open_settings()
+            elif cmd == "quit":
+                self.app.quit()
             elif cmd == "cancel":
                 self._cancel()
             elif cmd == "ask" and arg:
@@ -581,6 +587,7 @@ def main():
         def _begin_dictate(self):
             if self._dictating:
                 return
+            self._dictate_app = self._front_app()   # whatever has the keyboard right now
             self._disarm_barge()
             self._stop_recording()
             self.speaker.stop()
@@ -621,14 +628,14 @@ def main():
                 heard = ""
             heard = (heard or "").strip()
             tidy = ""
-            if heard:
+            if heard and cfg.get("dictateMode", "verbatim") != "verbatim":   # matches the Settings window page's own default
                 try:
                     r = subprocess.run([sys.executable, str(ATTICUS_PY), "--dictate-cleanup"], input=heard, env=_brain_env(),
                                        capture_output=True, text=True, timeout=float(cfg.get("dictateCleanupSeconds", 20)))
                     tidy = r.stdout.strip() if r.returncode == 0 else ""
                 except (OSError, subprocess.TimeoutExpired):
                     tidy = ""
-            final = tidy or heard                   # the tidy-up failing never loses the words
+            final = tidy or heard                   # the tidy-up failing (or verbatim mode) never loses the words
             ok, err = hands.insert_text(final) if final else (False, "")
             GLib.idle_add(self._dictate_done, gen, heard, final, ok, err)
 
@@ -636,6 +643,9 @@ def main():
             if gen != self._gen:
                 return False
             self._log("dictation", heard=heard, typed=final if ok else "", error=err)
+            if ok and final and cfg.get("dictateHistory", True):
+                from . import dictation_history
+                dictation_history.add(final, app=getattr(self, "_dictate_app", ""), raw=heard)
             en = str(self.transcriber.last_language or cfg.get("asrLanguage", "")).lower().startswith("en")
             if ok:
                 self.overlay.call("dictated", {})
@@ -1244,6 +1254,12 @@ def main():
                 self.overlay.call("copied")
             except Exception:
                 pass
+
+        def _open_settings(self):
+            if self._settings is None:
+                from .settings_window import SettingsWindow
+                self._settings = SettingsWindow(self.app, on_quit=self.app.quit)
+            self._settings.present()
 
         def _front_app(self):
             try:

@@ -505,8 +505,8 @@ def local_servers():
     def probe(row):
         name, base, address = row
         try:
-            # macOS curl bounds the whole transfer and never uses proxies, redirects or user curl settings.
-            response = subprocess.run(['/usr/bin/curl', '-q', '--silent', '--fail', '--noproxy', '*',
+            # -q: ignore ~/.curlrc, so the user's own curl settings never change this fixed, bounded probe.
+            response = subprocess.run([shutil.which('curl') or '/usr/bin/curl', '-q', '--silent', '--fail', '--noproxy', '*',
                                        '--max-time', '0.5', '--max-filesize', '1048576', address + '/v1/models'],
                                       capture_output=True, timeout=1)
             if response.returncode: return None
@@ -518,7 +518,7 @@ def local_servers():
     with ThreadPoolExecutor(max_workers=len(LOCAL_SERVERS)) as pool:
         return [found for found in pool.map(probe, LOCAL_SERVERS) if found]
 SHOT = '/tmp/atticus-screen'   # + -<n>.jpg, one per display
-os.environ['PATH'] = f"/opt/homebrew/bin:/usr/local/bin:{HOME}/.local/bin:{HOME}/.claude/local:/usr/bin:/bin:/usr/sbin:" + os.environ.get('PATH', '')
+os.environ['PATH'] = f"{HOME}/.local/bin:{HOME}/.claude/local:/usr/bin:/bin:/usr/sbin:" + os.environ.get('PATH', '')
 INNER = bool(os.environ.get('ATTICUS_ASK'))   # started by the AI's own tool call, not by the user
 APP = os.environ.get('ATTICUS_APP') or os.path.join(os.path.dirname(ME), 'bin', 'atticus-native')   # set by Atticus.app
 
@@ -7343,10 +7343,9 @@ def meeting_demo():
 def feedback(data):
     model = pref('model', DEFAULT_MODEL)
     model = model if model in ('haiku', 'sonnet', 'opus') else 'custom'
-    mac = subprocess.run(['/usr/sbin/sysctl', '-n', 'hw.model'], capture_output=True, text=True).stdout.strip()
     text = str(data.get('text', '')).strip()[:4000]   # what the user typed in Settings; they see it in the preview before it goes anywhere
     body = (f'## What happened\n\n{text}\n\n' if text else '## What happened\n\n\n## What you expected\n\n\n') + ('## Atticus\n'
-            f'Version: {APP_VERSION}\nVersion / commit: {str(data.get("version", "unknown"))[:80]}\nmacOS: {platform.mac_ver()[0]}\nMac model: {mac}\n'
+            f'Version: {APP_VERSION}\nVersion / commit: {str(data.get("version", "unknown"))[:80]}\nSystem: Linux {platform.release()}\nDesktop: {os.environ.get('XDG_CURRENT_DESKTOP', 'unknown')}\n'
             f'AI client: {client()}\nModel: {model}\nRouting: {routing_mode()}\nSafe mode: {"on" if pref("safe", True) else "off"}\n'
             f'Input: {"type" if pref("input", "voice") == "type" else "voice"}\n'
             f'Shortcut: {"toggle" if pref("talkMode", "hold") == "toggle" else "hold"}\n')
@@ -7354,7 +7353,7 @@ def feedback(data):
         rows = [r for r in read_rows(os.path.join(DIR, 'log.jsonl')) if r.get('status') != 'not_handled' and isinstance(r.get('task'), str) and plain(r['task']) not in ('report feedback', 'report a bug')]
         body += '\n## My last ask\n' + (rows[-1]['task'] if rows else '(No previous ask)') + '\n'
     return {'body': body, 'include': data.get('include') is True,
-            'url': 'https://github.com/SaarthurR/atticus-mac/issues/new?' + urllib.parse.urlencode({'title': 'Atticus feedback', 'body': body})}
+            'url': 'https://github.com/marcostolosa/atticus-linux/issues/new?' + urllib.parse.urlencode({'title': 'Atticus feedback', 'body': body})}
 
 
 def main():
@@ -7389,6 +7388,8 @@ def main():
         return sys.exit(0 if routine_fire(args[1]) else 1)
     if args == ['--routine-pop']:
         return print(json.dumps(routine_pop()))
+    if args == ['--routine-list']:   # the Settings window: raw rows, not the spoken summary
+        return print(json.dumps(routines()))
     if args[:1] == ['--agent-notify']:
         return notify(' '.join(args[1:])[:2000])
     if args == ['--agents']:

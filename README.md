@@ -102,6 +102,23 @@ o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "/home/youruser/.local/bin/attic
 hyprctl reload && hyprctl configerrors
 ```
 
+Add a Settings key the same way:
+
+```lua
+o.bind("CTRL + ALT + COMMA", "Atticus Settings", "/home/youruser/.local/bin/atticus-ctl settings")
+```
+
+## Settings window
+
+`atticus-ctl settings` opens a window over the same settings Atticus the
+voice assistant reads (`~/.config/atticus/settings.json`): shortcuts, the
+model, safety, privacy, the dictation dictionary and history, saved rules,
+usage and the feedback form all work from it. Four macOS-only sections carry
+over as explained text rather than a working control, until each gets its
+own pass: background agents (Automation/Calendar/"Enable All"), the meeting
+recorder, the Whisper model download manager (set `asrModel` by hand for
+now), and Contacts/Mail import.
+
 Native click and typing need `ydotool`, which only works once your user is in
 the `input` group — `build.sh` adds you to it, but that takes effect on your
 **next login**, not this session. Log out and back in once after the first
@@ -214,12 +231,20 @@ MIT. See [LICENSE](LICENSE).
 ## Dictation
 
 Say it and it is typed where the cursor is, in any app. Bind a key to
-`atticus-ctl dictate` (press to start, press again to finish; a pause of a
-couple of seconds finishes it too), or hold-to-dictate with
-`atticus-ctl dictate-press` on key down and `atticus-ctl dictate-release` on
-key up:
+`atticus-ctl dictate` in `~/.config/hypr/bindings.lua` (press to start, press
+again to finish; a pause of a couple of seconds finishes it too):
 
-    bind  = CTRL ALT, D, exec, atticus-ctl dictate
+```lua
+o.bind("CTRL + ALT + D", "Dictate", "/home/youruser/.local/bin/atticus-ctl dictate")
+```
+
+For true hold-to-dictate instead, bind the key's down and up events straight
+through Hyprland (`o.bind` only fires once per press):
+
+```
+bind  = CTRL ALT, D, exec, atticus-ctl dictate-press
+bindr = CTRL ALT, D, exec, atticus-ctl dictate-release
+```
 
 The words are tidied first (punctuation, names, false starts). One line is
 typed; several lines are pasted, because a typed line break would press Enter

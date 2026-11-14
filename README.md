@@ -149,6 +149,8 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `bargeIn` | `true` | Keep listening while Atticus speaks (through PipeWire echo cancellation) so talking over it stops the speech and is taken as the next request. |
 | `bargeVad` | `0.6` | How sure the voice detector must be that someone is talking over Atticus (0 to 1). Lower it if talking over it is not noticed. |
 | `model` | `"sonnet"` | Which Claude model answers: `"haiku"` (fastest), `"sonnet"`, `"opus"` or `"fable"`. Also in the model menu beside the text field. Everyday commands (time, timers, volume, lights) never wait for a model. |
+| `browser` | first found | Which Chromium browser Atticus drives for websites: `"brave"`, `"chromium"`, `"google-chrome-stable"`. |
+| `browserPort` | `9247` | Local port Atticus's own browser window listens on. |
 | `safe` | `true` | Sandbox and Allow cards (see Safety). |
 | `haUrl`, `haToken` | unset | Home Assistant address and a long-lived access token, for smart-home control. |
 | `micFix` | `true` | Set a sane capture volume at startup. |
@@ -208,3 +210,14 @@ voice by [Piper](https://github.com/OHF-Voice/piper1-gpl).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Websites
+
+For anything on a website Atticus opens the page in a browser window of its
+own and works through the page itself: it reads the text and the controls,
+then clicks or fills them, without moving your mouse. That window keeps its
+data in `~/.config/atticus/browser`, apart from your everyday browser, whose
+tabs and sign-ins are never touched. A site that needs an account has to be
+signed into once in Atticus's window. Sending, buying, deleting and other
+clicks that cannot be undone ask first.
+

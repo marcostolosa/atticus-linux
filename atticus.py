@@ -536,7 +536,9 @@ if sys.platform == 'darwin':
                    'Returns changed state; read documents with the window reader.\n')
     _PLACE_NOTE = 'full maximizes; fullscreen enters a Space.'
 else:
-    _WEB_TOOL = ''   # in-page DOM control is not available on Linux; native click/type below covers pages too
+    _WEB_TOOL = (f'- Web pages, in Atticus\'s own browser window (separate from the user\'s everyday browser, so a site may need signing in there once): '
+                 f'{WEB} read <url> opens a page and prints its text with numbered controls | read (again, after a change) | click <n> | fill <n> "<text>" | type-after "<exact anchor>" "<text>". '
+                 'Numbers come from the last read. Prefer this to pictures and mouse clicks for anything on a website.\n')
     _HANDS_TOOL = (f'- Native actions, by pixel coordinate (no accessibility label to target by name here): {HANDS} click <x> <y> "<what is there>" [double] [right] | '
                    'type "<text>" | press "<combo>" [times] ["<what it does>"] (ctrl/alt/shift/super, e.g. "ctrl+t", "alt+Tab") | scroll up|down|left|right <x> <y> [amount] (the position scrolls, same as a real wheel) | '
                    f'drag <x1> <y1> <x2> <y2> "<what is moved where>". The quoted words are shown and read aloud to the user when they are asked to allow it, so name the thing in their language as they would '
@@ -1319,52 +1321,6 @@ def keep_behind(mine, app, wait=1.5):
             return
 
 
-def background_tab(url, app):
-    """Navigate Atticus's last background page in place; making a new browser tab can activate its app."""
-    saved_path = os.path.join(os.environ.get('ATTICUS_ASK', DIR) if os.environ.get('ATTICUS_AGENT') else DIR, 'background-page.json')
-    try:
-        with open(saved_path) as f: saved = json.load(f)
-        adapter = browser_adapter(app)
-        if saved.get('app') != app or saved.get('adapter') != adapter or adapter not in ('chromium', 'webkit'):
-            return False
-        window, tab = saved['window'], saved['tab']
-        if not all(isinstance(i, int) and i > 0 for i in (window, tab)) or not isinstance(saved.get('url'), str):
-            return False
-        quoted = app.replace('\\', '\\\\').replace('"', '\\"')
-        target = f'first tab of window id {window} whose id is {tab}' if adapter == 'chromium' else f'tab {tab} of window id {window}'
-        script = (f'on run argv\ntell application "{quoted}"\nset t to {target}\n'
-                  'if (URL of t as text) is not item 1 of argv then error "Atticus page changed"\n'
-                  'set URL of t to item 2 of argv\nend tell\nend run')
-        r = subprocess.run(['osascript', '-e', script, saved['url'], url], capture_output=True, text=True, timeout=1)
-        if r.returncode: return False
-        page = {'app': app, 'adapter': adapter, 'window': window, 'tab': tab, 'target': None}
-        path = os.path.join(os.environ.get('ATTICUS_ASK', DIR), 'web.json')
-        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-        private_json(path, page)
-        return True
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
-        return False
-
-
-def remember_background_tab(app):
-    """Remember only a tab Atticus just opened or reused, including its final URL after redirects."""
-    page_path = os.path.join(os.environ.get('ATTICUS_ASK', DIR), 'web.json')
-    try:
-        with open(page_path) as f: page = json.load(f)
-        adapter, window, tab = page['adapter'], page['window'], page['tab']
-        quoted = app.replace('\\', '\\\\').replace('"', '\\"')
-        target = f'first tab of window id {window} whose id is {tab}' if adapter == 'chromium' else f'tab {tab} of window id {window}'
-        r = subprocess.run(['osascript', '-e', f'tell application "{quoted}" to get URL of {target}'],
-                           capture_output=True, text=True, timeout=1)
-        url = (r.stdout or '').strip()
-        if r.returncode or not url: return
-        saved = {'app': app, 'adapter': adapter, 'window': window, 'tab': tab, 'url': url}
-        os.makedirs(DIR, mode=0o700, exist_ok=True)
-        path = os.path.join(os.environ.get('ATTICUS_ASK', DIR) if os.environ.get('ATTICUS_AGENT') else DIR, 'background-page.json')
-        with open(path + '.tmp', 'w') as f: json.dump(saved, f)
-        os.chmod(path + '.tmp', 0o600); os.replace(path + '.tmp', path)
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
-        pass
 
 
 def show(target, bg=False):
@@ -2577,33 +2533,6 @@ def page_ready(read, want=''):
     return False
 
 
-def page_document(page):
-    """(URL, document id) of a browser tab, or None; the id changes when a new document loads, never when the page changes its own URL."""
-    _, tell = browser_terms(page['app'], page['adapter'], page['window'], page['tab'])
-    try: r = subprocess.run(['osascript', '-e', f'on run argv\n{tell}\nend run', 'location.href + "\\t" + performance.timeOrigin'], capture_output=True, text=True, timeout=2)
-    except (OSError, subprocess.TimeoutExpired): return None
-    found = r.stdout.strip().split('\t') if not r.returncode and isinstance(r.stdout, str) else []
-    return tuple(found) if len(found) == 2 and all(found) else None
-
-
-def live_page(app, adapter, window, url):
-    """This task's tab when it already shows url: that URL now, or the document opened for it, moved only by a redirect or its own
-    URL change. Reading it again must not reload it and lose what was done there."""
-    try:
-        with open(os.path.join(os.environ['ATTICUS_ASK'], 'web.json')) as f: page = json.load(f)
-    except (KeyError, OSError, ValueError): return None
-    if not isinstance(page, dict) or [page.get(k) for k in ('app', 'adapter', 'window')] != [app, adapter, window] or type(page.get('tab')) is not int: return None
-    now = page_document(page)
-    return page if now and (now[0] == url or page.get('opened') == url and now[1] == page.get('document')) else None
-
-
-def remember_work_tab(page):
-    """An agent clicked or filled in this tab: at the end its card links this page, read live from the tab."""
-    if not os.environ.get('ATTICUS_AGENT'): return
-    try: private_json(os.path.join(agent_gate_dir(os.environ['ATTICUS_ASK']), 'work-tab.json'),
-                      {**{k: page[k] for k in ('app', 'adapter', 'window', 'tab')}, **({'target': page['target']} if isinstance(page.get('target'), dict) else {})})   # target: its window, for the card
-    except (KeyError, OSError): pass
-
 
 def work_tab_page(directory):
     """The page in the tab an agent worked in, as a card link with its tab ({} when gone), so the card never relies on the model copying it."""
@@ -2635,171 +2564,75 @@ def show_tab(tab):
 
 
 def web(cmd, n='', text='', app=None, fresh=False, want='', page=None):
-    """Drive the user's browser tab through its page, not the screen: read it (numbered controls), click or fill by number.
-    Faster and surer than screenshots + mouse clicks; the user's mouse and focus stay put."""
+    """A page in Atticus's own browser window, used through the page itself: read it (text plus numbered controls),
+    click or fill a control by number. Quicker and surer than a picture and a mouse click, and the user's everyday
+    browser is left alone (atticus_shell/browser.py says why it is a separate window)."""
+    from atticus_shell import browser
+    path = os.path.join(os.environ.get('ATTICUS_ASK', DIR), 'web.json')
+    def keep(tab):
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        private_json(path, {'id': tab['id'], 'url': tab.get('url', '')})
     if cmd == 'read' and str(n).startswith(('http:', 'https:')):
         try:
             url = urllib.parse.urlsplit(n)
             if not url.hostname or url.username or url.password: return 'Use an HTTP(S) page URL without credentials.'
         except ValueError: return 'Use a valid HTTP(S) page URL.'
         if not agent_url_allowed(n): return agent_url_denial()
-        if pref('workIn', 'back') == 'front' and wants_focus(None, True):
-            status = show(n, bg=True)
-            if not status.startswith('opened '): return status
-            return web('read', app=app, want=n)
+        mine = front()[0]
+        problem = browser.ensure()
+        if problem: return problem
+        tab = browser.open_tab(n)
+        if not tab: return 'Could not open the page in the browser.'
+        keep(tab)
+        if not wants_focus(): keep_behind(mine, os.path.basename(browser.command() or ''), wait=.8)
+        want, n = n, ''
+    else:
+        if not browser.alive(): return f'No page is open in Atticus\'s browser. Open one first: {WEB} read <url>'
         try:
-            app = app or running_app(n)
-            adapter = browser_adapter(app) if app else ''
-            if not adapter: return 'Open a scriptable browser window first. Background reads never launch or focus a browser.'
-            quoted = app.replace('\\', '\\\\').replace('"', '\\"')
-            tab_id = 'id of t' if adapter == 'chromium' else 'index of t'
-            selection = 'active tab index' if adapter == 'chromium' else 'current tab'
-            own = agent_window(app) if os.environ.get('ATTICUS_AGENT') else 0
-            live = own and live_page(app, adapter, own, n)
-            if live: return web('read', app=app, want=n, page=live)
-            if os.environ.get('ATTICUS_AGENT'):   # the task's own window, reused for every page; the user's windows and tabs stay as they are
-                opened = ('set w to make new window\nset URL of active tab of w to item 1 of argv\nset t to active tab of w' if adapter == 'chromium' else
-                          'make new document with properties {URL:item 1 of argv}\nset w to window 1\nset t to current tab of w')
-                selected = 'set active tab index of w to (count tabs of w)' if adapter == 'chromium' else 'set current tab of w to t'
-                script = (f'on run argv\ntell application "{quoted}"\nset w to missing value\n'
-                          'try\nset w to window id ((item 2 of argv) as integer)\nend try\n'
-                          'if w is missing value then\nset prior to missing value\nif (count windows) > 0 then set prior to window 1\n'
-                          f'{opened}\nif prior is not missing value then set index of w to (count windows)\nset made to "new"\n'   # the new window goes behind; the user's window is never pulled forward
-                          f'else\nset t to make new tab at end of tabs of w with properties {{URL:item 1 of argv}}\n{selected}\nset made to ""\nend if\n'
-                          f'return (id of w as text) & (ASCII character 9) & ({tab_id} as text) & (ASCII character 9) & made\nend tell\nend run')
-                mine = osa('tell application "System Events" to get name of first process whose frontmost is true')
-            else:
-                script = (f'on run argv\ntell application "{quoted}"\n'
-                          'if (count windows) is 0 then error "No browser window"\n'
-                          f'set w to window 1\nset priorSelection to {selection} of w\n'
-                          'set t to make new tab at end of tabs of w with properties {URL:item 1 of argv}\n'
-                          f'set {selection} of w to priorSelection\n'
-                          f'return (id of w as text) & (ASCII character 9) & ({tab_id} as text) & (ASCII character 9)\nend tell\nend run')
-            r = subprocess.run(['osascript', '-e', script, n, str(own)], capture_output=True, text=True, timeout=5)
-            ids = r.stdout.strip('\n').split('\t')
-            if r.returncode or len(ids) != 3 or not all(i.isdigit() and int(i) > 0 for i in ids[:2]):
-                return 'Could not create a background page in an existing window. Requested page was not read.'
-            if ids[2] == 'new':
-                private_json(os.path.join(agent_gate_dir(os.environ['ATTICUS_ASK']), 'browser-window.json'), {'app': app, 'window': int(ids[0])})
-                keep_behind(mine, app, wait=.5)
-            page = dict(app=app, adapter=adapter, window=int(ids[0]), tab=int(ids[1]), target=None)
-            status = web('wait', text=n, app=app, page=page)
-            if status != 'Page ready.': return status + '\nRequested page not ready; do not substitute another source.'
-            document = os.environ.get('ATTICUS_AGENT') and page_document(page)
-            if document: page.update(opened=n, document=document[1])
-            result = web('read', app=app, want=n, page=page)
-            directory = os.environ.get('ATTICUS_ASK', DIR)
-            os.makedirs(directory, mode=0o700, exist_ok=True)
-            private_json(os.path.join(directory, 'web.json'), page)
-            return result
-        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-            return f'Could not read the background page: {e}'
-    explicit = app; app = app or os.environ.get('ATTICUS_FRONT', '')
-    path = os.path.join(os.environ.get('ATTICUS_ASK', DIR), 'web.json')
-    if page is None and not explicit and not fresh and (cmd != 'read' or os.environ.get('ATTICUS_ASK')):
-        try:
-            with open(path) as f: prior = json.load(f)
-            if isinstance(prior.get('app'), str): app = prior['app']
-        except (OSError,ValueError,AttributeError): pass
-    if not app:
-        return 'No browser is open.'
-    adapter = browser_adapter(app)
-    if not adapter:
-        return f'{app} does not expose a scriptable web page. Read it with {WINDOW} or {HANDS} see.'
+            with open(path) as f: tab = browser.tab(json.load(f).get('id', ''))
+        except (OSError, ValueError, AttributeError): tab = None
+        tab = tab or next(iter(browser.tabs()), None)   # none kept for this request: the page used last
+        if not tab: return f'No page is open in Atticus\'s browser. Open one first: {WEB} read <url>'
+    with open(WEB_JS) as f: src = f.read()
+    def js(c, timeout=15):
+        try: return browser.evaluate(tab['webSocketDebuggerUrl'], f'({src})({json.dumps(c)}, {json.dumps(n)}, {json.dumps(text)})', timeout)
+        except OSError as e: raise RuntimeError(str(e))
     try:
-        saved = page
-        if saved is None and not fresh and os.path.exists(path) and (cmd != 'read' or os.environ.get('ATTICUS_ASK')):
-            with open(path) as f: saved = json.load(f)
-        if not saved or saved.get('app') != app or saved.get('adapter') != adapter:
-            query, _ = browser_terms(app, adapter)
-            r = subprocess.run(['osascript', '-e', query], capture_output=True, text=True, timeout=5)
-            ids = r.stdout.strip().split('\t')
-            if r.returncode or len(ids) != 2 or not all(i.isdigit() for i in ids):
-                return f'Could not find a scriptable page window. Use {HANDS} see.'
-            saved = {'app': app, 'adapter': adapter, 'window': int(ids[0]), 'tab': int(ids[1]), 'target': None}
-            os.makedirs(os.path.dirname(path),mode=0o700,exist_ok=True)
-            private_json(path, saved)
-        if not all(isinstance(saved.get(k), int) and saved[k] > 0 for k in ('window', 'tab')):
-            raise ValueError('Invalid page target')
-        if os.environ.get('ATTICUS_AGENT') and cmd in ('click', 'fill', 'type-after') and saved['window'] != agent_window(app):
-            handed = handed_page()
-            if any(handed.get(k) != saved.get(k) for k in ('app', 'window', 'tab')):
-                return f"That page is in the user's own window; agents only read it. To act on it, open its URL in this task's window: {WEB} read <url>"
-            want = want or handed.get('url', '')   # the user's tab went to another site: never act on that one
-        if cmd in ('read','wait') or not saved.get('target'):
-            r = subprocess.run(['osascript', '-e', f'tell application "{app}" to get {{name, bounds}} of window id {saved["window"]}'],capture_output=True,text=True,timeout=2)
-            parts = r.stdout.strip().rsplit(', ',4)
-            if r.returncode or len(parts) != 5: raise ValueError('Could not locate the pinned page window')
-            l,t,right,bottom = map(float,parts[1:])
-            saved['target'] = preview_app(app, cmd, title=parts[0], frame=[l,t,right-l,bottom-t])
-            if cmd == 'read' and not n: hands_map(app, saved['target'])
-            if page is None: private_json(path, saved)
-        _, tell = browser_terms(app, adapter, saved['window'], saved['tab'])
-        if isinstance(saved.get('target'), dict): emit(['▣ ' + json.dumps({**saved['target'], 'action':cmd})])
-    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-        return f'Could not use the page: {e}\nUse the screen instead: {HANDS} see'
-    with open(WEB_JS) as f:
-        src = f.read()
-    def js(c, expr=None, timeout=15, again=True):
-        r = subprocess.run(['osascript', '-e', f'on run argv\n{tell}\nend run', expr or f'({src})({json.dumps(c)}, {json.dumps(n)}, {json.dumps(text)})'],
-                           capture_output=True, text=True, timeout=timeout)
-        if again and 'turned off' in r.stderr and adapter == 'chromium' and allow_page_js(app, ask=True):
-            return js(c, expr, timeout, False)
-        if 'turned off' in r.stderr or 'not allowed' in r.stderr.lower():
-            raise RuntimeError(f'{app} blocks this. Tell the user to turn on, once: ' + ('Safari > Develop > Allow JavaScript from Apple Events.' if app == 'Safari'
-                               else f'{app} menu bar > View > Developer > Allow JavaScript from Apple Events.'))
-        if r.returncode:
-            raise RuntimeError(r.stderr.strip()[-300:] or 'the page did not answer')
-        return r.stdout.strip()
-    try:
-        if cmd == 'wait': return 'Page ready.' if page_ready(lambda timeout:js('ready',timeout=timeout), text) else 'Page still loading. Read again before acting.'
-        def same_source():
-            state = json.loads(js('ready'))
-            current = str(state.get('signature', '')).split('|')[0]
-            host = lambda url: (urllib.parse.urlsplit(url).hostname or '').removeprefix('www.')
-            return host(current) == host(want)
-        if want and not same_source(): return 'The browser is not on the requested source. Read it again before continuing.'
+        if want and not page_ready(lambda timeout: js('ready', timeout=max(timeout, 2)), want):
+            return 'Page still loading. Read again before acting.'
+        if cmd == 'wait': return 'Page ready.' if page_ready(lambda timeout: js('ready', timeout=max(timeout, 2)), text) else 'Page still loading. Read again before acting.'
         if cmd == 'click':
-            try:
-                c = json.loads(js('name'))
-            except ValueError:
-                return 'No such control. Read the page again.'
+            try: c = json.loads(js('name'))
+            except ValueError: return 'No such control. Read the page again.'
             if c.get('submit') or re.search(RISKY_CLICK, c['what'], re.I) and pref('safe', True):
                 if not os.environ.get('ATTICUS_ASK'):   # a saved shortcut has no Allow card: never click these blind
                     return 'This click needs the user\'s confirmation. Ask through Atticus, not a shortcut.'
                 if not task_allowed('web click'):
-                    answer = ask_user({'q': f'Click "{c["short"][:40]}"?', 'cmd': f'{app}: click "{c["what"][:300]}"', 'task': managed_agent()}, 60)
+                    words = HANDS_WORDS['pt' if str(pref('asrLanguage', os.environ.get('LANG', ''))).lower().startswith('pt') else 'en']
+                    site = urllib.parse.urlsplit(c.get('url', '')).hostname or ''
+                    answer = ask_user({'q': words['click'].format(c['short'][:60]), 'cmd': site, 'task': managed_agent()}, 60)
                     if answer == 'task' and managed_agent(): allow_for_task('web click')
                     elif answer != 'y': return 'The user said no. Do not try another way; say it was not done.'
             if json.loads(js('name')) != c:
                 return 'The control changed since the check. Read the page again.'
-            text = c['url']   # click only in the tab that was checked
+            text = c['url']   # click only on the page that was checked
             done = js('click')
             if not done.startswith('Clicked'): return done
-            remember_work_tab(saved)
             try:
-                if not page_ready(lambda timeout:js('ready',timeout=timeout)): return done + '\nPage still loading. Read again before acting.'
+                if not page_ready(lambda timeout: js('ready', timeout=max(timeout, 2))): return done + '\nPage still loading. Read again before acting.'
                 changed = js('state')
                 try: state = json.loads(changed)
                 except ValueError: state = {'target': {'label': c['short'], 'status': changed}, 'page': json.loads(js('ready'))}
                 return done + '\nChanged state:\n' + json.dumps(state, ensure_ascii=False)
-            except (RuntimeError,ValueError,subprocess.TimeoutExpired):
-                return done + '\nPage readiness unavailable. Read again before acting.'   # the click succeeded; never report it failed and cause a duplicate
+            except (RuntimeError, ValueError):
+                return done + '\nPage readiness unavailable. Read again before acting.'   # the click went through; never report it failed and cause a second one
         result = js(cmd if cmd in ('read', 'fill', 'type-after') else 'read')
-        if want and not same_source(): return 'The page left the requested source during the read. Its content was not returned.'
-        if cmd == 'type-after':
-            return result
         if cmd == 'fill' and result.startswith('Filled'):
-            remember_work_tab(saved)
-            try:
-                if not page_ready(lambda timeout: js('ready', timeout=timeout)):
-                    return result + '\nPage still loading. Re-read values before claiming success.'
-                return result + '\nChanged state:\n' + js('state')
-            except (RuntimeError, ValueError, subprocess.TimeoutExpired):
-                return result + '\nChanged state unavailable. Re-read values before claiming success.'
+            try: return result + '\nChanged state:\n' + js('state')
+            except (RuntimeError, ValueError): return result + '\nChanged state unavailable. Re-read values before claiming success.'
         return result
-    except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
-        return f'Could not use the page: {e}\nUse the screen instead: {HANDS} see'   # e.g. a second, windowless Chrome took the AppleScript
+    except (RuntimeError, ValueError) as e:
+        return f'Could not use the page: {e}\nUse the screen instead: {LOOK} and {HANDS}'
 
 
 def allow_page_js(app, ask=False):

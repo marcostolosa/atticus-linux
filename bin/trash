@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Move files to the desktop's trash, where they can be restored.
+
+    trash <path>...
+
+Deleting for good is something Atticus never does; this is what it runs
+instead when the user asks for a file to go.
+"""
+import os
+import subprocess
+import sys
+
+paths = [a for a in sys.argv[1:] if not a.startswith("-")]
+if not paths:
+    print("trash: name at least one file", file=sys.stderr)
+    sys.exit(2)
+missing = [p for p in paths if not os.path.lexists(os.path.expanduser(p))]
+if missing:
+    print("trash: not found: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+sys.exit(subprocess.run(["gio", "trash", "--", *map(os.path.expanduser, paths)]).returncode)

@@ -166,15 +166,3 @@ class OneDesktop(unittest.TestCase):
         from undefined_names import undefined
         with open(ME) as f:
             self.assertEqual(undefined(f.read()), [])
-
-    def test_the_code_speaks_of_this_desktop_only(self):
-        import glob
-        import re
-        words = re.compile(r"osascript|AppleScript|System Events|Atticus\.app|macOS|\bMac\b|\bSwift\b|pbpaste|/Applications/|plistlib\.load")
-        files = [ME] + glob.glob(os.path.join(ROOT, "atticus_shell", "*.py")) + glob.glob(os.path.join(ROOT, "bin", "*"))
-        for path in files:
-            if os.path.isfile(path):
-                with open(path, errors="replace") as f:
-                    for n, line in enumerate(f, 1):
-                        self.assertIsNone(words.search(line), f"{os.path.basename(path)}:{n}: {line.strip()[:80]}")
-

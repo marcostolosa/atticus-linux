@@ -84,6 +84,7 @@ def main():
             self.app = app
             self.listening = False
             self._level_source = 0
+            first_run = not cfg.all()   # no settings yet: the setup window introduces itself once
             cfg.migrate_wake_word_keys()
             self._fix_mic_gain()
             self._wake_session = False
@@ -149,7 +150,25 @@ def main():
                 self.overlay,
                 speak=self._speak_answer,
                 on_done=self._on_done,
-                on_prompt=self._on_prompt)
+                on_prompt=self._on_prompt,
+                on_draw=self._on_draw,
+                on_point=lambda x, y: self.drawing.point(x, y),
+                on_handoff=lambda brief: self.agents.prepare(brief),
+                on_agent=lambda identifier, view: self.agents.open_view(identifier) if view else self.agents.show(identifier))
+            from .meeting import MeetingCopilot
+            self.meeting = MeetingCopilot(
+                app, transcribe=self.transcriber.transcribe,
+                mic_device=self._meeting_mic, pause_wake=self._meeting_wake, open_settings=self._open_settings)
+            from .agents import AgentPanels
+            self.agents = AgentPanels(
+                app, box_js=lambda fn, value: self.overlay.call(fn, value) if value is not None else self.overlay.call(fn),
+                box_state=lambda: {"busy": self.bridge.running(), "typing": False,
+                                   "listening": self.listening, "visible": self.overlay.window.get_visible()},
+                show_box=self.overlay.present, hide_box=self._schedule_autohide,
+                sound=lambda name: self.earcons.play({"ask": "start", "start": "end", "done": "end"}.get(name, name)))
+            from .drawing import ScreenDrawing
+            from .overlay import _ui_language
+            self.drawing = ScreenDrawing(app, speak=self._speak_step, language=_ui_language)
             self.transcriber.warm()
             self.speaker.warm()
             self._show_models()
@@ -175,6 +194,8 @@ def main():
                     print("[atticus] wake word enabled but no engine available (need faster-whisper or a trained model)", flush=True)
                     self.wake = None
 
+            if first_run:
+                GLib.idle_add(lambda: (self._open_setup(), False)[1])
             # Hold the app alive without a visible window until the hotkey fires.
             self._hold = Gio.Application.hold(app)
             self.overlay.window.set_visible(False)
@@ -285,7 +306,82 @@ def main():
                         pass
 
         # --- hotkey / control ---------------------------------------------
+        def _open_setup(self):
+            if getattr(self, "_setup", None) is None:
+                from .setup_window import SetupWindow
+                self._setup = SetupWindow(self.app, on_done=lambda: setattr(self, "_setup", None), open_settings=self._open_settings)
+            self._setup.present()
+
+        def _meeting_mic(self):
+            """The microphone a meeting listens to: the echo-free one when
+            there is one, so the call heard through the speakers is not
+            written down again as the user's own words."""
+            if self._aec:
+                from . import echo
+                return echo.SOURCE
+            return None
+
+        def _meeting_wake(self, paused):
+            """During a call the wake word stays off: the other people's
+            voices would set it off."""
+            if not self.wake:
+                return
+            if paused:
+                self.wake.pause()
+            elif not self.listening:
+                self.wake.resume()
+
+        def _on_draw(self, guide):
+            """A guide from the brain: draw it and tell the waiting tool
+            whether it is up (it waits on the receipt file for 5 s)."""
+            try:
+                result = self.drawing.show(guide)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                result = f"Could not draw: {e}"
+            receipt = guide.get("receipt")
+            if isinstance(receipt, str) and receipt:
+                try:
+                    with open(receipt + ".tmp", "w") as f:
+                        f.write(result)
+                    os.rename(receipt + ".tmp", receipt)
+                except OSError:
+                    pass
+
+        def _speak_step(self, text):
+            """A guide's caption, read aloud when answers are."""
+            if not cfg.get("speak", True):
+                return
+            lang = str(self.transcriber.last_language or cfg.get("asrLanguage", "") or "")
+            self.speaker.speak(text, lang if lang and lang != "auto" else None)
+
         def _on_control(self, cmd, arg):
+            if cmd in ("draw-next", "draw-back", "draw-close"):
+                getattr(self.drawing, cmd[5:])()
+                return
+            if cmd == "setup":       # the first-run window, again
+                self._open_setup()
+                return
+            if cmd in ("press", "toggle") and getattr(self, "_setup", None):
+                self._setup.tried()   # its "try it" page waits for this key
+            if cmd == "meeting":     # the meeting panel: prepare, then listen to a call
+                self.meeting.open()
+                return
+            if cmd == "meeting-stop":
+                self.meeting.stop()
+                return
+            if cmd == "agents":      # the window with every background task
+                self.agents.open_view(arg)
+                return
+            if cmd == "agent" and arg:   # these words become a background task straight away
+                import uuid
+                self.agents.prepare({"title": " ".join(arg.split()[:4]), "brief": arg[:1000], "request": arg, "context": "",
+                                     "accepted": True, "handoffId": uuid.uuid4().hex})
+                return
+            if cmd == "move":        # the request the box is working on goes to the background
+                self.bridge.move()
+                return
             if cmd == "press":
                 self._begin_listen()
             elif cmd == "release":
@@ -321,10 +417,12 @@ def main():
                     self._pre_capture_visible = self.overlay.window.get_visible()
                 self._capture_depth += 1
                 self.overlay.window.set_visible(False)
+                self.drawing.set_hidden(True)
             elif cmd == "show-after-capture":
                 self._capture_depth = max(0, self._capture_depth - 1)
                 if self._capture_depth == 0:
                     self.overlay.window.set_visible(self._pre_capture_visible)
+                    self.drawing.set_hidden(False)
             elif cmd == "probe":
                 self.overlay.eval_js(
                     "console.log('PROBE ' + JSON.stringify({"
@@ -869,6 +967,15 @@ def main():
                 return False   # superseded by a newer session or a cancel; drop it
             text = (text or "").strip()
             self._log("heard", text=text, by=self.transcriber.last_engine)
+            # The big recognizer lives on another machine. When it cannot be
+            # reached the small one here takes over and mishears much more:
+            # the box says so once, so a bad day is not a mystery.
+            down = self.transcriber.last_engine == "local" and self.transcriber.remote.down
+            if down and not getattr(self, "_told_down", False):
+                from .overlay import _ui_language
+                self.overlay.call("line", "· " + ("Servidor de fala fora do ar: estou entendendo pior." if _ui_language() == "pt"
+                                                  else "Speech server unreachable: I understand less well for now."))
+            self._told_down = bool(down)
             if not text and heard_voice and not self._retry:
                 self._ask_again(gen)
                 return False
@@ -987,6 +1094,18 @@ def main():
 
         def _start_brain(self, text):
             self.overlay.present()
+            # A guide on screen answers to "next", "back" and "close" by voice:
+            # the hands may be on the mouse. Anything else is a new request,
+            # and the old guide leaves so its marks do not sit on the answer.
+            if self.drawing.active:
+                from . import intents
+                said = intents.guide_word(text)
+                if said:
+                    getattr(self.drawing, said)()
+                    self.overlay.hide()
+                    self._resume_wake()
+                    return
+                self.drawing.close()
             # Everyday commands (timer, volume, next song, open an app…) are
             # recognized and run right here, with no AI round trip. Anything
             # the parser is not sure about falls through to the model.
@@ -1216,6 +1335,16 @@ def main():
                 else:
                     self.bridge.answer_pick(body["pick"])
                 return
+            if body.get("agents"):
+                self.agents.open_view()
+            if isinstance(body.get("agentOpen"), str):
+                self.agents.open(body["agentOpen"], body.get("target") if isinstance(body.get("target"), str) else None)
+                self.agents.dismiss_ping(body["agentOpen"])
+            if isinstance(body.get("agentLater"), str):
+                self.agents.dismiss_ping(body["agentLater"])
+            if isinstance(body.get("agentConnect"), str):
+                subprocess.Popen(["xdg-open", "https://claude.ai/settings/connectors"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.agents.dismiss_ping(body["agentConnect"])
             if body.get("models"):
                 self._show_models()
             if body.get("model") in self.MODELS:

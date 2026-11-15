@@ -299,7 +299,6 @@
     <h3>Dictate anywhere</h3>
     <div class="group">
       <div class="row"><div class="t"><b id="dictatelabel">Dictation shortcut</b><span id="dictatehint"></span></div><div class="keyfield"><button class="kf" id="dictatechange" aria-labelledby="dictatelabel" aria-describedby="dictatehint"></button><button class="x" id="dictateclear" aria-label="Clear dictation shortcut">×</button></div></div>
-      <div class="row" id="globefix" hidden><div class="t"><b>Set Press 🌐 key to Do Nothing</b></div><button class="btn" data-do="globeKey">Open Keyboard Settings</button></div>
       <div class="row"><div class="t"><b>Dictated text</b><span id="dictatemodehint">Clean up drops fillers, fixes misheard words.</span></div><div class="seg" data-k="dictateMode"><button data-v="verbatim">Verbatim</button><button data-v="cleanup">Clean up</button></div></div>
     </div>
     <h3>Dictionary</h3>
@@ -311,12 +310,12 @@
     <h3>History<button class="all" id="dictationclear">Clear All…</button></h3>
     <input id="dictationsearch" type="search" placeholder="Search dictations" aria-label="Search dictation history" autocomplete="off">
     <div class="group" id="dictationhistory" role="list" aria-label="Dictation history"></div>
-    <div class="group"><div class="row"><div class="t"><b>Save dictation history</b><span>Only on this Mac. <i class="info" title="Last 500 dictations, up to 30 days. Turning off keeps what’s saved.">i</i></span></div><label class="sw"><input type="checkbox" data-k="dictateHistory" aria-label="Save dictation history"></label></div></div>
+    <div class="group"><div class="row"><div class="t"><b>Save dictation history</b><span>Only on this computer. <i class="info" title="Last 500 dictations, up to 30 days. Turning off keeps what’s saved.">i</i></span></div><label class="sw"><input type="checkbox" data-k="dictateHistory" aria-label="Save dictation history"></label></div></div>
   </section>
   <section id="general" class="on">
     <h1>General</h1>
     <p class="lede">Your shortcut. Your way to talk.</p>
-    <div class="group"><div class="row"><div class="t"><b>Interface language</b><span>Automatic follows your Mac.</span></div><select data-k="uiLanguage"><option value="auto">Automatic</option><option value="en">English</option><option value="it">Italiano</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option></select></div></div>
+    <div class="group"><div class="row"><div class="t"><b>Interface language</b><span>Automatic follows the system language.</span></div><select data-k="uiLanguage"><option value="auto">Automatic</option><option value="en">English</option><option value="pt">Português</option><option value="it">Italiano</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option></select></div></div>
     <h3>Shortcut</h3>
     <div class="shortcut" id="shortcut">
       <div class="caps" id="caps" aria-live="polite"></div>
@@ -326,16 +325,15 @@
     <div class="group">
       <div class="row"><div class="t"><b>Shortcut opens</b></div><div class="seg" data-k="input"><button data-v="voice">Voice</button><button data-v="type">Typing</button></div></div>
       <div class="row"><div class="t"><b id="talklabel">Shortcut behavior</b><span id="talkhint">Esc cancels.</span></div><div class="seg" data-k="talkMode" role="group" aria-labelledby="talklabel"><button data-v="hold">Hold to talk</button><button data-v="toggle">Press to toggle</button></div></div>
-      <div class="row"><div class="t"><b>Wake word</b><span>Listen on this Mac. Close the box to end hands-free chat.</span></div><input class="field" style="flex:0 0 110px" data-k="wakeWordName" maxlength="40" placeholder="Atticus" spellcheck="false" aria-label="Wake word to say"><label class="sw"><input type="checkbox" data-k="wakeWord"></label></div>
+      <div class="row"><div class="t"><b>Wake word</b><span>Listen on this computer. Close the box to end hands-free chat.</span></div><input class="field" style="flex:0 0 110px" data-k="wakeWordName" maxlength="40" placeholder="Atticus" spellcheck="false" aria-label="Wake word to say"><label class="sw"><input type="checkbox" data-k="wakeWord"></label></div>
     </div>
     <h3>Dictation</h3>
     <div class="group">
       <div class="row"><div class="t"><b>Microphone</b></div><select data-k="microphone"></select></div>
-      <div class="row"><div class="t"><b>Speech model</b><span>Speech is best for most people. All stay on this Mac. <i class="info" title="Pick a language under Interface language to use it for Speech and Dictation when supported. Automatic keeps speech in English (US). Whisper supports automatic language detection on this Mac.">i</i></span></div><div class="seg" data-k="speechModel"><button data-v="speech">Speech</button><button data-v="dictation">Dictation</button><button data-v="whisper">Whisper</button></div></div>
-      <div class="row" data-w hidden><div class="t"><b>Whisper model</b><span>Bigger is slower and more accurate. <i class="info" title="Turbo: fast, very close to Large. Large v3: most accurate, slower. Small: lightest, least accurate. Downloaded once, then runs offline.">i</i></span></div><select data-k="whisperModel"><option value="turbo">Turbo · 574 MB</option><option value="large">Large v3 · 1.1 GB</option><option value="small">Small · 190 MB</option></select></div>
-      <div class="row" data-w hidden><div class="t"><b>Language</b><span>Auto-detect works for most people.</span></div><select data-k="whisperLanguage"><option value="auto">Auto-detect</option><option value="en">English</option><option value="id">Indonesian</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option><option value="hi">Hindi</option><option value="ar">Arabic</option><option value="ru">Russian</option><option value="tr">Turkish</option><option value="vi">Vietnamese</option><option value="th">Thai</option><option value="pl">Polish</option><option value="sv">Swedish</option><option value="uk">Ukrainian</option></select></div>
-      <div class="row" data-w hidden><div class="t"><b>Whisper status</b><span class="status"><i class="dot bad" id="wdot"></i><span id="wtext" role="status" aria-live="polite">Checking…</span></span></div><div class="wacts"><button class="btn" id="winstall" hidden>Install</button><button class="btn blue" id="wdownload" hidden>Download</button><button class="btn" id="wcancel" hidden>Cancel</button></div></div>
-      <div class="row" id="wstored" hidden><div class="t"><b>Downloaded speech models</b><span>Stored on this Mac. Delete one to free its space.</span></div><div class="wacts" id="wstoredb"></div></div>
+      <div class="row"><div class="t"><b>Speech model</b><span>Runs on this computer when no speech server answers. Bigger is slower and more accurate. <i class="info" title="Tiny and Base answer fastest. Small is the usual choice. Medium and Large v3 Turbo want a fast processor. Downloaded once, then runs offline.">i</i></span></div><select data-k="asrModel"><option value="tiny">Tiny · 78 MB</option><option value="base">Base · 148 MB</option><option value="small">Small · 486 MB</option><option value="medium">Medium · 1.5 GB</option><option value="large-v3-turbo">Large v3 Turbo · 1.6 GB</option></select></div>
+      <div class="row"><div class="t"><b>Language</b><span>Auto-detect works for most people.</span></div><select data-k="asrLanguage"><option value="auto">Auto-detect</option><option value="en">English</option><option value="id">Indonesian</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="pt">Portuguese</option><option value="it">Italian</option><option value="nl">Dutch</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option><option value="hi">Hindi</option><option value="ar">Arabic</option><option value="ru">Russian</option><option value="tr">Turkish</option><option value="vi">Vietnamese</option><option value="th">Thai</option><option value="pl">Polish</option><option value="sv">Swedish</option><option value="uk">Ukrainian</option></select></div>
+      <div class="row"><div class="t"><b>Model status</b><span class="status"><i class="dot bad" id="wdot"></i><span id="wtext" role="status" aria-live="polite">Checking…</span></span></div><div class="wacts"><button class="btn blue" id="wdownload" hidden>Download</button><button class="btn" id="wcancel" hidden>Cancel</button></div></div>
+      <div class="row" id="wstored" hidden><div class="t"><b>Downloaded speech models</b><span>Stored on this computer. Delete one to free its space.</span></div><div class="wacts" id="wstoredb"></div></div>
       <div class="row"><div class="t"><b>Sound volume</b></div><input type="range" min="0" max="0.6" step="0.02" data-k="volume"><span class="val" id="volv"></span></div>
     </div>
     <h3>Answers</h3>
@@ -348,8 +346,7 @@
     <div class="group">
       <div class="row"><div class="t"><b>Open at login</b></div><label class="sw"><input type="checkbox" data-k="login"></label></div>
       <div class="row"><div class="t"><b>Pause Atticus</b></div><label class="sw"><input type="checkbox" data-k="paused"></label></div>
-      <div class="row"><div class="t"><b>Show in menu bar</b><span>Hidden? Open it from Spotlight.</span></div><label class="sw"><input type="checkbox" data-k="menuIcon"></label></div>
-      <div class="row"><div class="t"><b>Quit Atticus</b><span>Reopen it from Spotlight.</span></div><button class="btn red" data-do="quit">Quit</button></div>
+      <div class="row"><div class="t"><b>Quit Atticus</b><span>Start it again with systemctl --user start atticus.</span></div><button class="btn red" data-do="quit">Quit</button></div>
     </div>
     <h3>Scheduled routines</h3>
     <div class="group" id="routines"></div>
@@ -370,7 +367,7 @@
     </div>
     <h3>Custom server</h3>
     <div class="group">
-      <div class="row" id="localserver" hidden><div class="t"><b id="localname"></b><span>Already running on this Mac.</span></div><button class="btn blue" id="uselocal"></button></div>
+      <div class="row" id="localserver" hidden><div class="t"><b id="localname"></b><span>Already running on this computer.</span></div><button class="btn blue" id="uselocal"></button></div>
       <div class="row"><div class="t"><b>Address</b><span>Ollama, LM Studio or any Claude-style API.</span></div><input class="field" id="apiBase" placeholder="https://api.deepseek.com/anthropic" spellcheck="false" aria-label="Custom server address"></div>
       <div class="row"><div class="t"><b>Key</b></div><input class="field" id="apiKey" type="password" placeholder="Not needed for local servers" aria-label="Custom server key"></div>
       <div class="row"><div class="t"><b>Model</b><span id="srvnote" role="status">Needs vision for screen tasks.</span></div><input class="field" id="apiModel" list="apimodels" placeholder="deepseek-flash" spellcheck="false" aria-label="Custom server model"><datalist id="apimodels"></datalist></div>
@@ -380,14 +377,14 @@
 
   <section id="memory">
     <h1>Memory</h1>
-    <div class="profile-head"><h3>About you</h3><button class="btn blue" id="profileImport">Import from your Mac</button></div>
+    <div class="profile-head"><h3>About you</h3><button class="btn blue" id="profileImport">Import from your computer</button></div>
     <p class="lede" style="margin:0 2px 9px;font-size:11.5px">Only your name and answer style go with every ask.</p>
     <div class="group" id="profileCategories"></div>
     <div class="profile-sources" id="profileSources"></div>
     <div id="profileStatus" role="status" aria-live="polite"></div>
     <h3>Learning</h3>
     <div class="group">
-      <div class="row"><div class="t"><b>Save chats</b><span>Plain conversations, in Agents on this Mac. <i class="info" title="Answers that changed nothing. They never go with your asks.">i</i></span></div><label class="sw"><input type="checkbox" data-k="saveChats"></label></div>
+      <div class="row"><div class="t"><b>Save chats</b><span>Plain conversations, in Agents on this computer. <i class="info" title="Answers that changed nothing. They never go with your asks.">i</i></span></div><label class="sw"><input type="checkbox" data-k="saveChats"></label></div>
       <div class="row"><div class="t"><b>Learn about me</b><span>Keeps lasting facts you say. <i class="info" title="Never from screen text, health, money or passwords.">i</i></span></div><label class="sw"><input type="checkbox" data-k="learnMe"></label></div>
     </div>
     <h3>Rules</h3>
@@ -417,7 +414,6 @@
     <div class="appbar"><div class="seg" id="appview" role="group" aria-label="App list"><button data-v="key" class="on" aria-pressed="true">Key Apps</button><button data-v="all" aria-pressed="false">All Apps</button></div>
       <input id="appq" class="search" placeholder="Search all apps" aria-label="Search all apps"><button class="btn blue" id="allow" disabled>Allow</button></div>
     <div id="applist"><div class="group"><div class="empty">Finding your apps…</div></div></div>
-    <p class="note">Click OK on each macOS box. To take access away: System Settings → Privacy &amp; Security → Automation. <a data-do="automation">Open it</a></p>
   </section>
 
   <section id="account">
@@ -433,36 +429,33 @@
     <h3>Privacy</h3>
     <div class="group">
       <div class="row"><div class="t"><b>Look at my screen</b><span>Only when you mean it, like “this”. <i class="info" title="The picture goes with that one ask.">i</i></span></div><div class="seg" data-k="screen"><button data-v="auto">Automatic</button><button data-v="never">Never</button></div></div>
-      <div class="row"><div class="t"><b>Hide from screen sharing</b><span id="sharingUnavailable" hidden>On this macOS version, Atticus windows can appear in screen sharing.</span></div><label class="sw"><input type="checkbox" data-k="hideWhenSharing"></label></div>
       <div class="row"><div class="t"><b>Count me as a user</b><span>Anonymous feature, timing and error counts. <i class="info" title="A random ID, with no task text, dictated words, files or screen content.">i</i></span></div><label class="sw"><input type="checkbox" data-k="stats"></label></div>
       <div class="row"><div class="t"><b>Help improve Atticus</b><span>Anonymous reports when a task fails. <i class="info" title="Sends what you asked, the steps it took and why. Emails, numbers, file paths and anything typed for you are removed first.">i</i></span></div><label class="sw"><input type="checkbox" data-k="improve"></label></div>
     </div>
-    <h3>Permissions</h3>
+    <h3>What Atticus uses</h3>
     <div class="group" id="perms">
-      <div class="row"><div class="t"><b>Microphone</b><span>To hear you.</span></div><span class="pill ok">Allowed</span><button class="btn" data-g="mic">Allow</button></div>
-      <div class="row"><div class="t"><b>Speech Recognition</b><span>On this Mac.</span></div><span class="pill ok">Allowed</span><button class="btn" data-g="speech">Allow</button></div>
-      <div class="row"><div class="t"><b>Accessibility</b><span>To click and move windows.</span></div><span class="pill ok">Allowed</span><button class="btn" data-g="ax">Allow</button></div>
-      <div class="row"><div class="t"><b>Screen Recording</b><span>When you say “this”.</span></div><span class="pill ok">Allowed</span><button class="btn" data-g="screen">Allow</button></div>
-      <div class="row"><div class="t"><b>Apps</b></div><button class="btn" onclick="st.tab('apps')">Choose</button></div>
+      <div class="row"><div class="t"><b>Microphone</b><span>To hear you.</span></div><span class="pill ok">Ready</span><button class="btn" data-g="mic">Fix</button></div>
+      <div class="row"><div class="t"><b>Speech Recognition</b><span>On this computer.</span></div><span class="pill ok">Ready</span><button class="btn" data-g="speech">Fix</button></div>
+      <div class="row"><div class="t"><b>Keyboard and Mouse</b><span>To click, type and move windows.</span></div><span class="pill ok">Ready</span><button class="btn" data-g="ax">Fix</button></div>
+      <div class="row"><div class="t"><b>Screen Capture</b><span>When you say “this”.</span></div><span class="pill ok">Ready</span><button class="btn" data-g="screen">Fix</button></div>
     </div>
     <h3>Agents</h3>
     <div class="group" id="agentsetup">
       <div class="row"><div class="t"><b>Set up agents</b><span>Asked only when a task needs them.</span></div><button class="btn blue" id="enableAll">Enable All</button></div>
-      <div class="row"><div class="t"><b>Page reading in Chrome</b><span>Atticus turns this on itself.</span></div><span class="pill ok">On</span><button class="btn" data-g="chrome">Turn On</button></div>
-      <div class="row"><div class="t"><b>Automation</b><span>Lets agents script your apps.</span></div><span class="pill ok">Allowed</span><button class="btn" data-g="auto">Allow</button></div>
-      <div class="row"><div class="t"><b>Calendar</b><span>When you ask.</span></div><span class="pill ok">Allowed</span><button class="btn" data-g="calendar">Allow</button></div>
+      <div class="row"><div class="t"><b>Page reading in the browser</b><span>Atticus turns this on itself.</span></div><span class="pill ok">On</span><button class="btn" data-g="chrome">Turn On</button></div>
+      <div class="row"><div class="t"><b>Calendar</b><span>When you ask.</span></div><span class="pill ok">Ready</span><button class="btn" data-g="calendar">Fix</button></div>
       <div class="row"><div class="t"><b>Claude connectors</b><span id="conntext">Checking your Claude account…</span></div><button class="btn" data-do="connectors">Connect in Claude</button></div>
     </div>
   </section>
 
   <section id="meetings">
     <div id="meetingbrowse">
-      <h1>Meetings</h1><p class="lede">A little context, whenever you need it. Saved on this Mac.</p>
+      <h1>Meetings</h1><p class="lede">A little context, whenever you need it. Saved on this computer.</p>
       <div class="group meeting-prep"><div class="row"><div class="t"><b>Prepare for a call</b><span>Notes and files load when your next call starts.</span></div><button class="btn" data-do="meetingDemo" id="meetingDemo">Try Demo</button><button class="btn blue" data-do="meetingPrepOpen" id="meetingPrepOpen">Open Copilot</button><button class="btn blue" id="meetingOn">Turn On</button></div></div>
       <details class="meeting-controls"><summary>Meeting Copilot settings</summary><div class="group">
       <div class="row"><div class="t"><b>Meeting Copilot</b><span>The call and your mic, in a private panel. <i class="info" title="On supported calls, listening ends two seconds after the app releases the mic.">i</i></span></div><label class="sw"><input type="checkbox" data-k="meeting" aria-label="Meeting Copilot"></label></div>
-      <div class="row"><div class="t"><b>Save meeting transcripts</b><span>On this Mac. <i class="info" title="Transcripts, notes and answers. At the end, choose Save or Don’t save. Turning off offers to keep or delete past meetings.">i</i></span></div><label class="sw"><input type="checkbox" data-k="meetingSave" aria-label="Save meeting transcripts"></label></div>
-      <div class="row"><div class="t"><b>AI meeting summaries</b><span>Claude reads the transcript once. <i class="info" title="For a recap and action items. With Devin or Pi, meetings stay on this Mac. Off: a local recap, and prep won’t search connected email or documents.">i</i></span></div><label class="sw"><input type="checkbox" data-k="meetingSummary" aria-label="AI meeting summaries"></label></div>
+      <div class="row"><div class="t"><b>Save meeting transcripts</b><span>On this computer. <i class="info" title="Transcripts, notes and answers. At the end, choose Save or Don’t save. Turning off offers to keep or delete past meetings.">i</i></span></div><label class="sw"><input type="checkbox" data-k="meetingSave" aria-label="Save meeting transcripts"></label></div>
+      <div class="row"><div class="t"><b>AI meeting summaries</b><span>Claude reads the transcript once. <i class="info" title="For a recap and action items. With Devin or Pi, meetings stay on this computer. Off: a local recap, and prep won’t search connected email or documents.">i</i></span></div><label class="sw"><input type="checkbox" data-k="meetingSummary" aria-label="AI meeting summaries"></label></div>
       <div class="row"><div class="t"><b>Prep in a Claude chat</b><span>Copies a prompt for call notes.</span></div><button class="btn" data-do="meetingPrepPrompt" id="meetingPrepPrompt">Copy Prompt</button></div>
       </div>
       </details>
@@ -601,18 +594,17 @@
   let connected = false;   // Enable All opens claude.ai's connectors page only when none is connected
   document.getElementById('enableAll').onclick = () => post({ do: 'enableAll', connected: String(connected) });
 
-  // Shortcut: Atticus.swift records the keys; the label is like "⌃⌥Space" (modifier symbols, then the key)
-  const capsOf = label => { const m = label.match(/^([⌃⌥⇧⌘]*)(.*)$/); return [...m[1]].concat(m[2] ? [m[2]] : []); };
-  const showCaps = (label, hint) => $('caps').innerHTML = capsOf(label).map(c => `<i class="cap${c.length > 2 ? ' wide' : ''}">${c}</i>`).join('')
+  // Shortcut: the label is like "Super+Alt+A", one key cap per part
+  const capsOf = label => label ? label.split('+').map(c => c || '+') : [];
+  const showCaps = (label, hint) => $('caps').innerHTML = capsOf(label).map(c => `<i class="cap${c === 'Space' ? ' wide' : ''}">${c}</i>`).join('')
     + (hint ? `<span class="hint">${hint}</span>` : '');
   let recording = '';
   $('change').onclick = () => {
     if (recording) return cancelRecord();
     recording = 'main'; $('shortcut').classList.add('rec'); $('change').textContent = 'Cancel Recording';
-    showCaps('', 'Recording — press your shortcut'); $('schint').textContent = 'Press a key combo, a modifier on its own, or an F-key. Esc or click away cancels.'; $('schint').className = '';
-    post({ do: 'record' });
-  };
-  const dictateHint = () => dictateHotkeyTaken ? 'Another app uses this shortcut. Record another.' : 'Hold to talk. Double-tap to lock.';
+    showCaps('', 'Recording — press your shortcut'); $('schint').textContent = 'Press a key with Super, Ctrl or Alt, or an F-key. Esc or click away cancels.'; $('schint').className = '';
+      };
+  const dictateHint = () => dictateHotkeyTaken ? 'Another app uses this shortcut. Record another.' : 'Press to start. Press again to finish.';
   const showKeys = (label, text) => {   // the dictation field: its keys, or what to do
     $('dictatechange').innerHTML = label ? capsOf(label).map(c => `<i class="cap">${esc(c)}</i>`).join('') : `<span>${esc(text)}</span>`;
     $('dictatechange').classList.toggle('set', !!label && recording !== 'dictate');
@@ -620,8 +612,7 @@
   $('dictatechange').onclick = () => {
     if (recording) return cancelRecord();
     recording = 'dictate'; $('dictatechange').classList.add('rec'); $('dictateclear').hidden = true; showKeys('', 'Type Shortcut');
-    $('dictatehint').textContent = 'Press a key combo, a modifier on its own, or an F-key. Esc cancels.'; $('dictatehint').className = '';
-    post({ do: 'recordDictate' });
+    $('dictatehint').textContent = 'Press a key with Super, Ctrl or Alt, or an F-key. Esc cancels.'; $('dictatehint').className = '';
   };
   $('dictateclear').onclick = () => post({ do: 'clearDictate' });
 
@@ -631,13 +622,27 @@
     $('schint').className = ''; $('dictatehint').className = ''; paint(); post({ do: 'cancelRecord' });
   };
   document.addEventListener('pointerdown', e => { if (!e.target.closest('#change,#dictatechange')) cancelRecord(); });
+  // While recording, the page reads the keys. Keys that already do something on this desktop never arrive here.
+  const KEYNAMES = { Space: 'SPACE', Enter: 'RETURN', Comma: 'COMMA', Period: 'PERIOD', Slash: 'SLASH', Semicolon: 'SEMICOLON', Minus: 'MINUS', Equal: 'EQUAL',
+    Tab: 'TAB', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', ArrowUp: 'UP', ArrowDown: 'DOWN' };
+  const MODKEYS = { Meta: 'SUPER', Super: 'SUPER', OS: 'SUPER', Control: 'CTRL', Alt: 'ALT', Shift: 'SHIFT' };
+  document.addEventListener('keydown', e => {
+    if (!recording) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') return cancelRecord();
+    const held = new Set([e.metaKey && 'SUPER', e.ctrlKey && 'CTRL', e.altKey && 'ALT', e.shiftKey && 'SHIFT', MODKEYS[e.key]].filter(Boolean));
+    const mods = ['SUPER', 'CTRL', 'ALT', 'SHIFT'].filter(m => held.has(m)), c = e.code;
+    const key = /^Key[A-Z]$/.test(c) ? c[3] : /^Digit\d$/.test(c) ? c[5] : /^F\d{1,2}$/.test(c) ? c : KEYNAMES[c] || '';
+    if (!key) return st.rec(mods.map(m => m[0] + m.slice(1).toLowerCase()).join('+'));
+    if (!mods.some(m => m !== 'SHIFT') && !/^F\d/.test(key)) return st.rec('Add Super, Ctrl or Alt');
+    post({ do: 'setHotkey', kind: recording === 'dictate' ? 'dictate' : 'talk', keys: [...mods, key].join(' + ') });
+  }, true);
 
   document.querySelectorAll('.seg[data-k],input[data-k],select[data-k]').forEach(e=>{if(e.matches('.seg'))e.setAttribute('role','group');if(!e.hasAttribute('aria-label')&&!e.hasAttribute('aria-labelledby'))e.setAttribute('aria-label',e.closest('.row')?.querySelector('.t b')?.textContent||e.dataset.k)});
   document.querySelectorAll('.info').forEach(i => { i.tabIndex = 0; i.setAttribute('role', 'img'); i.setAttribute('aria-label', i.title); });
 
   document.querySelectorAll('select[data-k]').forEach(s => s.onchange = () => set(s.dataset.k, s.value));
-  const wid = () => P.whisperModel || 'turbo';
-  $('winstall').onclick = () => post({ do: 'whisperInstall' });
+  const wid = () => P.asrModel || 'small';
   [['wdownload', 'whisperDownload'], ['wcancel', 'whisperCancel']].forEach(([b, d]) => $(b).onclick = () => post({ do: d, id: wid() }));
   document.querySelectorAll('.seg[data-k]').forEach(g => g.querySelectorAll('button').forEach(b => b.onclick = () => set(g.dataset.k, b.dataset.v)));
   document.querySelectorAll('.sw input[data-k]').forEach(i => i.onchange = () => set(i.dataset.k, i.checked));
@@ -653,27 +658,27 @@
   const dim = (k, off) => { const e = document.querySelector(`[data-k=${k}]`); e.closest('.row').classList.toggle('dim', off); if (e.type === 'range') e.disabled = off; };   // greyed, not hidden: rows below stay put
   let W = null;   // last st.whisper status; the model select repaints from it with no round trip
   function paintWhisper() {
-    const m = W?.models?.find(m => m.id === wid()), dl = m?.progress != null, btn = !W || W.installing ? '' : dl ? 'wcancel' : !W.server ? 'winstall' : !m?.have ? 'wdownload' : '';
-    const text = !W ? 'Checking…' : W.installing ? 'Installing whisper.cpp… You can keep using your Mac.' : dl ? `Downloading ${Math.round(m.progress * 100)}%…` : W.error || (!W.server ? 'Needs whisper.cpp.' : !m?.have ? 'Model not downloaded.' : 'Ready. Runs on this Mac.');
+    const m = W?.models?.find(m => m.id === wid()), dl = m?.progress != null, btn = !W ? '' : dl ? 'wcancel' : !m?.have ? 'wdownload' : '';
+    const text = !W ? 'Checking…' : dl ? `Downloading ${Math.round(m.progress * 100)}%…` : W.error || (!m?.have ? 'Model not downloaded.' : 'Ready. Runs on this computer.');
     if ($('wtext').textContent !== text) $('wtext').textContent = text;   // same text: no repeat announcement
-    $('wtext').classList.toggle('wait', dl || !!W?.installing); $('wdot').classList.toggle('bad', !W || dl || !!W.error || !W.server || !m?.have);
-    ['winstall', 'wdownload', 'wcancel'].forEach(b => $(b).hidden = b !== btn);
+    $('wtext').classList.toggle('wait', dl); $('wdot').classList.toggle('bad', !W || dl || !!W.error || !m?.have);
+    ['wdownload', 'wcancel'].forEach(b => $(b).hidden = b !== btn);
     const stored = W?.models?.filter(m => m.have) || [], key = stored.map(m => m.id).join();   // shown under any speech model, so space is always freeable
     $('wstored').hidden = !stored.length;
     if ($('wstoredb').dataset.key !== key) {
       $('wstoredb').dataset.key = key;
       $('wstoredb').replaceChildren(...stored.map(m => { const b = document.createElement('button'); b.className = 'btn red'; b.textContent = `Delete ${m.name} · ${m.size}`;
-        b.onclick = () => { if (P.speechModel === 'whisper' && m.id === wid()) set('speechModel', 'speech'); post({ do: 'whisperDelete', id: m.id }); };   // the talk key keeps working on Apple Speech
+        b.onclick = () => post({ do: 'whisperDelete', id: m.id });
         return b; }));
     }
     $('wdownload').textContent = m?.size ? `Download ${m.size}` : 'Download';
-    $('wtext').closest('.row').hidden = P.speechModel !== 'whisper' || !!(W && !W.installing && !dl && !W.error && W.server && m?.have);   // ready: nothing to say or do
+    $('wtext').closest('.row').hidden = !!(W && !dl && !W.error && m?.have);   // ready: nothing to say or do
   }
   function paint() {
     const devin = P.client === 'devin', pi = P.client === 'pi', other = devin || pi;
     if (!P.routing) P.routing = P.model && P.model !== 'haiku' ? 'capable' : P.escalate === false || P.escalateAuto === false ? 'cheapest' : 'balanced';
     if (!recording) showCaps(P.hotkeyLabel);
-    $('reset').style.display = P.hotkeyLabel === '⌃⌥Space' ? 'none' : '';
+    $('reset').style.display = P.hotkeyLabel === P.defaultHotkeyLabel ? 'none' : '';
     if (recording !== 'dictate') showKeys(P.dictateHotkeyLabel, 'Record Shortcut');
     $('dictateclear').hidden = !P.dictateHotkeyLabel || recording === 'dictate';
     $('dictatechange').classList.toggle('bad', dictateHotkeyTaken && recording !== 'dictate');
@@ -696,7 +701,7 @@
       s.value = s.dataset.k === 'microphone' && ![...s.options].some(o => o.value === value) ? 'automatic' : value;
     });
     document.querySelectorAll('input[type=range]').forEach(r => r.value = P[r.dataset.k]);
-    document.querySelectorAll('[data-w]').forEach(r => r.hidden = P.speechModel !== 'whisper'); paintWhisper();
+    paintWhisper();
     $('volv').textContent = Math.round(P.volume / .6 * 100) + '%';
     $('routingwhy').textContent = WHY[P.routing] || '';
     SERVER.forEach(k => { if (document.activeElement !== $(k)) $(k).value = P[k] || ''; });
@@ -825,7 +830,7 @@
       `<button class="btn red" data-profile-source="${source}">Forget everything from ${sourceName[source]} · ${sourceCounts[source]}</button>`).join('');
     document.querySelectorAll('[data-profile-source]').forEach(b => b.onclick = () => post({do:'me',action:'forget-source',source:b.dataset.profileSource}));
     const imported = (sourceCounts.contacts || 0) + (sourceCounts.mail || 0);
-    $('profileImport').textContent = imported ? 'Refresh' : 'Import from your Mac';
+    $('profileImport').textContent = imported ? 'Refresh' : 'Import from your computer';
     if (imported && !$('profileStatus').textContent) $('profileStatus').textContent = `${sourceCounts.contacts || 0} from Contacts · ${sourceCounts.mail || 0} from Mail`;
   }
   $('profileImport').onclick = () => { $('profileImport').disabled = true; $('profileStatus').textContent = 'Importing from Contacts and Mail…'; post({do:'profileImport'}); };
@@ -838,11 +843,11 @@
     e.onkeydown = ev => { if (ev.key === 'Enter') e.blur(); }; });
   ['apiModel', 'agentApiModel'].forEach(k => $(k).onfocus = () => { if (P.apiBase) post({ do: 'models' }); });
 
-  // Apps: every installed app; suggested ones start ticked. Atticus.swift asks macOS about the ticked ones in one go.
+  // Apps: every installed app; suggested ones start ticked.
   let APPS = [], pick = null, asking = 0, total = 0, view = 'key';
   function appRow(a) {
     const end = a.status === 'allowed' ? '<span class="pill ok">Allowed</span>'
-      : a.status === 'blocked' ? '<span class="pill no" data-do="automation" title="macOS won’t ask again. Turn it on in System Settings.">Blocked · Fix</span>'
+      : a.status === 'blocked' ? '<span class="pill no" data-do="automation">Blocked · Fix</span>'
       : a.status === 'asking' ? '<span class="pill wait">Asking…</span>'
       : `<input type="checkbox" class="ck" data-id="${a.id}" ${pick.has(a.id) ? 'checked' : ''} aria-label="Allow ${esc(a.name)}">`;
     return `<label class="row app"><img src="${a.icon}" alt=""><div class="t"><b>${esc(a.name)}</b></div>${end}</label>`;
@@ -871,7 +876,7 @@
   document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => post({ do: 'grant', id: b.dataset.g }));
   document.querySelectorAll('#appview button').forEach(b => b.onclick = () => { view = b.dataset.v; paintApps(); });
   $('allow').onclick = () => {
-    if (asking) {   // stops now; the macOS box on screen still takes an answer, and the list refreshes when it's done
+    if (asking) {   // stops now; the list refreshes when it's done
       post({ do: 'stopAllow' }); asking = 0;
       APPS.forEach(a => { if (a.status === 'asking') a.status = 'new'; });
       return paintApps();
@@ -946,7 +951,7 @@
       if (errors.some(e => !denied.includes(e))) $('profileStatus').append(' Try importing again. ');
       if (denied.length) {
         const names = denied.map(e => ({contacts: 'Contacts', mail: 'Mail'}[e] || e)).join(' and ');
-        const fix = document.createElement('button'); fix.className = 'btn'; fix.textContent = `Allow ${names} in Automation`;
+        const fix = document.createElement('button'); fix.className = 'btn'; fix.textContent = `Allow ${names}`;
         fix.onclick = () => post({ do: 'automation' }); $('profileStatus').append(fix);
       }
     },
@@ -974,7 +979,7 @@
     },
     walk(id) { document.querySelectorAll('#perms .row, #agentsetup .row').forEach(r => r.classList.toggle('now', !!id && !!r.querySelector(`[data-g="${id}"]`))); },   // Enable All: the step it is on
   connectors(c) { const n = c.connected.length, s = c.signin.length; document.getElementById('conntext').textContent = n ? c.connected.slice(0, 3).join(', ') + (n > 3 ? ` and ${n - 3} more` : '') + ' connected' + (s ? ` · ${s} need sign-in` : '') : s ? `${s} need sign-in` : 'Gmail, Drive and more.'; connected = n > 0; },
-  perms(p) {   // each row shows Allowed or its Allow button
+  perms(p) {   // each row shows Ready or its Fix button
       document.querySelectorAll('[data-g]').forEach(b => { b.hidden = !!p[b.dataset.g]; b.previousElementSibling.hidden = !p[b.dataset.g]; });
     },
     notice(n) { showNotice(n.text); },
@@ -995,9 +1000,9 @@
     agents({ count }) { $('agentcount').textContent = count ? count + ' running' : ''; $('agentsnav').setAttribute('aria-label', count ? `Open Agents, ${count} running` : 'Open Agents'); },
     dictation(d) { dictations = d; paintDictation(); },
     whisper(s) { W = s; paintWhisper(); },
-    globe(on) { $('globefix').hidden = !on; },   // fn alone also fires macOS's own 🌐 action
+    globe() {},
     load(d) {
-      P = {uiLanguage: 'auto', talkMode: 'hold', dictateMode: 'verbatim', dictateHotkeyLabel: '', microphone: 'automatic', whisperModel: 'turbo', whisperLanguage: 'auto', meetingSave: true, meetingSummary: true, client: 'claude', ...d.prefs}; recording = '';
+      P = {uiLanguage: 'auto', talkMode: 'hold', dictateMode: 'verbatim', dictateHotkeyLabel: '', microphone: 'automatic', asrModel: 'small', asrLanguage: 'auto', meetingSave: true, meetingSummary: true, client: 'claude', ...d.prefs}; recording = '';
       window.i18n?.setLanguage(P.uiLanguage);
       P.routines = d.routines || []; paintRoutines();
       $('shortcut').classList.remove('rec'); $('change').textContent = 'Change Shortcut'; $('dictatechange').classList.remove('rec');
@@ -1005,7 +1010,6 @@
       if (d.icon) $('icon').src = $('bigicon').src = d.icon;
       $('ver').textContent = $('aboutver').textContent = d.version ? 'Version ' + d.version : 'Atticus';
       $('autoUpdateRow').hidden = $('checkUpdate').hidden = !!d.managedUpdates;
-      $('sharingUnavailable').hidden = !d.sharingUnavailable;
       $('updateTitle').textContent = d.managedUpdates ? 'Updates are managed by Nix' : 'Check for updates';
       $('upstatus').textContent = d.update || 'Never checked this session.';
       if (d.mics) this.mics(d.mics);
@@ -1018,9 +1022,10 @@
       select.value = [...select.options].some(o => o.value === value) ? value : 'automatic';
     },
     rec(m) { if (recording === 'dictate') /^Add/.test(m) || !m ? showKeys('', m || 'Type Shortcut') : showKeys(m); else if (recording) /^Add/.test(m) ? showCaps('', m) : showCaps(m, m ? '' : 'Press your shortcut'); },   // held modifiers, live
-    taken(kind, own) {   // own: the keys are Atticus's other shortcut
+    taken({ kind, own, what }) {   // own: the keys are Atticus's other shortcut; what: the action that has them
       const dictate = kind === 'dictate', line = $(dictate ? 'dictatehint' : 'schint');
-      line.textContent = own ? `That’s already your ${dictate ? 'Atticus' : 'dictation'} shortcut. Kept your old one.` : 'Another app already uses that shortcut. Kept your old one.'; line.className = 'warn';
+      recording = ''; $('shortcut').classList.remove('rec'); $('change').textContent = 'Change Shortcut'; $('dictatechange').classList.remove('rec'); paint();
+      line.textContent = own ? `That’s already your ${dictate ? 'Atticus' : 'dictation'} shortcut. Kept your old one.` : `Those keys already do “${what}”. Kept your old one.`; line.className = 'warn';
       setTimeout(() => { line.className = ''; paint(); if (!dictate) { $('schint').className = hotkeyTaken ? 'taken' : ''; $('schint').textContent = shortcutHint(); } }, 4000);
     },
     state,

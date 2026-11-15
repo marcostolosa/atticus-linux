@@ -21,6 +21,8 @@ from typing import Any, Optional
 
 from . import dictation_history
 from . import settings as cfg
+from . import shortcuts
+from . import speech_models
 from .bridge import ATTICUS_PY, _brain_env
 
 RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
@@ -39,6 +41,23 @@ def brain(*args: str, input: Optional[str] = None, timeout: float = 20) -> str:
         return ""
 
 
+def meetings(request: dict) -> dict:
+    """Saved meetings, through the brain that wrote their recaps."""
+    result = brain_json("--meetings", input=json.dumps(request), timeout=120)
+    return result if isinstance(result, dict) else {"error": "Could not open saved meetings. Try again."}
+
+
+def agents_running() -> int:
+    """Background tasks working now, read from what the supervisor saves (one JSON file per task)."""
+    count = 0
+    for path in (Path(os.environ.get("ATTICUS_DIR", Path.home() / ".config/atticus")) / "agents").glob("*/state.json"):
+        try:
+            count += json.loads(path.read_text()).get("status") == "running"
+        except (OSError, ValueError, AttributeError):
+            pass
+    return count
+
+
 def brain_json(*args: str, input: Optional[str] = None, timeout: float = 20) -> Any:
     try:
         return json.loads(brain(*args, input=input, timeout=timeout) or "null")
@@ -46,7 +65,7 @@ def brain_json(*args: str, input: Optional[str] = None, timeout: float = 20) -> 
         return None
 
 
-# --- real, checkable facts about this machine (the macOS "Permissions" rows map to these) ---
+# --- checkable facts about this machine: the rows under "What Atticus uses" ---
 def mic_ok() -> bool:
     return bool(shutil.which("parecord") or shutil.which("pw-record") or shutil.which("arecord"))
 
@@ -109,23 +128,18 @@ def set_microphone(uid: str) -> None:
 
 
 def hyprland_binds() -> dict[str, str]:
-    """The press-to-talk and dictation shortcuts, read from Hyprland's live
-    bind table — there is no in-window recorder here: compositor-level
-    binds are set in ~/.config/hypr/, not by holding a key inside Atticus
-    (see the README)."""
-    try:
-        rows = json.loads(subprocess.run(["hyprctl", "-j", "binds"], capture_output=True, text=True, timeout=3).stdout or "[]")
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        rows = []
-    found: dict[str, str] = {}
-    for b in rows if isinstance(rows, list) else []:
-        arg = str(b.get("arg", "")) if isinstance(b, dict) else ""
-        combo = "+".join(x for x in (b.get("mods", ""), b.get("key", "")) if x) if isinstance(b, dict) else ""
-        if re.search(r"atticus-ctl\s+(press|toggle)\b", arg):
-            found["talk"] = combo
-        elif "atticus-ctl dictate" in arg:
-            found["dictate"] = combo
-    return found
+    """The talk and dictation shortcuts as the pages show them ("Super+Alt+A")."""
+    return shortcuts.labels()
+
+
+def set_shortcut(kind: str, keys: str | None, hold: bool | None = None) -> Optional[tuple[str, Any]]:
+    """Bind new keys and answer the page: the whole state again, or why the old keys stay."""
+    why = shortcuts.write(kind, keys, hold)
+    if why.startswith(("own:", "taken:")):
+        return "taken", {"kind": kind, "own": why.startswith("own:"), "what": why.split(":", 1)[1]}
+    if why:
+        return "notice", {"text": why}
+    return "load", initial_state()
 
 
 def state_payload() -> dict:
@@ -152,8 +166,8 @@ DEFAULTS: dict[str, object] = {
     "paused": False, "agentUserTools": True, "meetingSummary": True,
     "speak": True, "dictateMode": "verbatim", "dictateHistory": True,
     "wakeWord": False, "wakeWordName": "atticus", "talkMode": "hold",
-    "uiLanguage": "auto", "microphone": "automatic", "whisperModel": "turbo",
-    "whisperLanguage": "auto", "meetingSave": True, "client": "claude",
+    "uiLanguage": "auto", "microphone": "automatic", "asrModel": speech_models.DEFAULT,
+    "asrLanguage": "auto", "meetingSave": True, "client": "claude",
 }
 
 
@@ -162,7 +176,7 @@ def prefs_with_defaults() -> dict:
 
 
 def initial_state() -> dict:
-    icon_path = RES / "ui" / "AppIcon.icns"
+    icon_path = RES / "assets" / "logo.svg"
     version = ""
     try:
         version = (RES / "VERSION").read_text().strip()
@@ -170,8 +184,9 @@ def initial_state() -> dict:
         pass
     binds = hyprland_binds()
     return {
-        "prefs": {**prefs_with_defaults(),
-                  "hotkeyLabel": binds.get("talk", ""), "dictateHotkeyLabel": binds.get("dictate", "")},
+        "prefs": {**prefs_with_defaults(), "talkMode": "hold" if shortcuts.read().get("hold") else "toggle",   # what the bound line really does
+                  "hotkeyLabel": binds.get("talk", ""), "dictateHotkeyLabel": binds.get("dictate", ""),
+                  "defaultHotkeyLabel": shortcuts.label(shortcuts.DEFAULTS["talk"]), "canHold": shortcuts.can_hold()},
         "routines": brain_json("--routine-list") or [],
         "icon": str(icon_path) if icon_path.exists() else "",
         "version": version,
@@ -183,6 +198,11 @@ def initial_state() -> dict:
         "state": state_payload(),
         "binds": binds,
     }
+
+
+def push(name: str, payload: Any) -> None:
+    """Something to tell the page with no message from it first (a download moving on).
+    The Settings window replaces this with its own sender while it is open."""
 
 
 def dispatch(body: dict) -> Optional[tuple[str, Any]]:
@@ -197,6 +217,8 @@ def dispatch(body: dict) -> Optional[tuple[str, Any]]:
             cfg.set(k, v)
             if k == "microphone" and isinstance(v, str):
                 set_microphone(v)
+            if k == "talkMode":   # hold or toggle is which line is bound, not something the shell decides
+                return set_shortcut("talk", None, hold=v == "hold")
         return None
     if do == "copy" and isinstance(body.get("text"), str):
         try:
@@ -236,7 +258,7 @@ def dispatch(body: dict) -> Optional[tuple[str, Any]]:
         elif action == "forget-source" and isinstance(body.get("source"), str):
             brain("--me", "forget-source", body["source"], "Settings")
         elif action == "import":
-            return "profileImport", {"errors": ["contacts", "mail"], "errorReasons": {}, "counts": {}}
+            return "profileImport", brain_json("--me", "import") or {"errors": ["contacts", "mail"], "errorReasons": {}, "counts": {}}
         return "state", state_payload()
     if do == "dictationWord":
         words = [w for w in (cfg.get("dictateWords", []) or []) if isinstance(w, str)]
@@ -263,7 +285,7 @@ def dispatch(body: dict) -> Optional[tuple[str, Any]]:
     if do == "connectors":
         return "connectors", brain_json("--connectors") or {"connected": [], "signin": []}
     if do == "agents":
-        return "agents", {"count": 0}   # background agents are not wired into this shell yet
+        return "agents", {"count": agents_running()}
     if do == "apps":
         from . import assistant
         try:
@@ -275,28 +297,69 @@ def dispatch(body: dict) -> Optional[tuple[str, Any]]:
         kind = body["id"]
         if kind in PERM_CHECKS:
             return ("perms", perms_payload()) if PERM_CHECKS[kind]() else ("notice", {"text": PERM_FIX[kind]})
-        return "notice", {"text": "There is no per-app permission to grant on Linux: one setup "
-                                  "(Accessibility, above) covers every app ydotool can reach."}
+        return "notice", {"text": "There is no per-app permission to grant here: Keyboard and Mouse, "
+                                  "above, covers every app ydotool can reach."}
     if do in ("allow", "stopAllow", "enableAll"):
-        return "notice", {"text": "Background agents are not available in this build yet."}
+        return "notice", {"text": "Background agents need no per-app permission on this desktop: what a task may do is asked on its own card."}
     if do == "automation":
-        return "notice", {"text": "There is no Automation permission on Linux; see Accessibility, above."}
+        return "notice", {"text": "Apps need no separate permission here; see Keyboard and Mouse, above."}
     if do == "setup":
         return "notice", {"text": "Run `claude /login` in a terminal, or set a custom server address below."}
     if do == "resetHotkey":
-        return "notice", {"text": "Shortcuts are set in ~/.config/hypr/, not recorded in this window on Linux "
-                                  "— see the README for the lines to bind."}
+        return set_shortcut("talk", shortcuts.DEFAULTS["talk"])
+    if do == "setHotkey" and body.get("kind") in ("talk", "dictate") and isinstance(body.get("keys"), str):
+        return set_shortcut(body["kind"], body["keys"])
+    if do == "clearDictate":
+        return set_shortcut("dictate", None)
     if do == "globeKey":
         return None
     if do == "checkUpdate":
         return "load", initial_state()
     if do in ("record", "recordDictate", "cancelRecord"):
-        return "notice", {"text": "Shortcuts are set in ~/.config/hypr/ (see the README), not recorded here."}
-    if do in ("whisperInstall", "whisperDownload", "whisperCancel", "whisperDelete"):
-        return "notice", {"text": "The speech-model manager is not wired into this window yet. Set `asrModel` "
-                                  "in ~/.config/atticus/settings.json for now."}
-    if do in ("meetings", "meetingOpen", "meetingCopy", "meetingExport", "meetingDelete"):
-        return "meetings", {"notice": "Meetings are not wired into this window yet."}
+        return None   # the page reads the keys itself and sends setHotkey
+    if do == "whisper":
+        return "whisper", speech_models.status()
+    if do in ("whisperDownload", "whisperCancel", "whisperDelete") and isinstance(body.get("id"), str):
+        if do == "whisperDownload":
+            speech_models.download(body["id"], lambda: push("whisper", speech_models.status()))
+        else:
+            (speech_models.cancel if do == "whisperCancel" else speech_models.delete)(body["id"])
+        return "whisper", speech_models.status()
+    if do == "meetings":
+        return "meetings", meetings({"action": "list", "query": body.get("query") if isinstance(body.get("query"), str) else ""})
+    if do == "meetingOpen" and isinstance(body.get("id"), str):
+        return "meetings", meetings({"action": "get", "id": body["id"]})
+    if do == "meetingDelete" and isinstance(body.get("id"), str):
+        # the page's own Delete button is the confirmation here; the list comes back without it
+        meetings({"action": "delete", "id": body["id"]})
+        return "meetings", meetings({"action": "list", "query": ""})
+    if do == "meetingExport" and isinstance(body.get("id"), str):
+        result = meetings({"action": "export", "id": body["id"]})
+        if not isinstance(result.get("markdown"), str):
+            return "meetings", result
+        title = re.sub(r"[^\w .-]+", " ", str((result.get("meeting") or {}).get("title") or "Meeting")).strip()[:80] or "Meeting"
+        folder = Path(subprocess.run(["xdg-user-dir", "DOCUMENTS"], capture_output=True, text=True).stdout.strip() or Path.home())
+        path = folder / (title + ".md")
+        n = 1
+        while path.exists():
+            n += 1
+            path = folder / f"{title} {n}.md"
+        try:
+            path.write_text(result["markdown"])
+            os.chmod(path, 0o600)
+            return "meetings", {"notice": f"Markdown exported to {path}."}
+        except OSError:
+            return "meetings", {"error": "Could not export."}
+    if do == "meetingCopy" and isinstance(body.get("text"), str):
+        try:
+            subprocess.run(["wl-copy"], input=body["text"].encode(), timeout=3)
+            return "meetings", {"notice": "Copied."}
+        except (OSError, subprocess.TimeoutExpired):
+            return "meetings", {"error": "Could not copy."}
+    if do in ("meetingPrepOpen", "meetingDemo"):
+        from . import control
+        control.send("meeting", retries=1, delay=0)
+        return None
     if do == "feedbackPreview":
         result = brain_json("--feedback", input=json.dumps({"text": body.get("text", ""), "include": bool(body.get("include"))}))
         if isinstance(result, dict):

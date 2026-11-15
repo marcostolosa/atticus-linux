@@ -92,32 +92,31 @@ cd atticus-linux
 downloads the default Portuguese voice, writes the `atticus` and `atticus-ctl`
 launchers into `~/.local/bin`, and installs and starts the user service.
 
-Then add the hotkey to `~/.config/hypr/bindings.lua` and reload Hyprland:
+It also binds the keys, as lines in `~/.config/hypr/bindings.lua` (a key that
+already does something on your desktop is left alone and reported):
 
-```lua
-o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "/home/youruser/.local/bin/atticus-ctl toggle")
-```
+| Keys | What |
+| --- | --- |
+| `Super+Alt+A` | Talk: press, speak, press again to send |
+| `Super+Alt+D` | Dictation |
+| `Super+Ctrl+Alt+A` | Settings |
 
-```bash
-hyprctl reload && hyprctl configerrors
-```
-
-Add a Settings key the same way:
-
-```lua
-o.bind("CTRL + ALT + COMMA", "Atticus Settings", "/home/youruser/.local/bin/atticus-ctl settings")
-```
+Change them in Settings → General → Change Shortcut: press the new keys and
+the line in `bindings.lua` is rewritten and Hyprland reloaded. If Hyprland
+reports an error the old line is put back. "Hold to talk" binds the key's
+press and release (`o.bind_hold`) instead of a toggle.
 
 ## Settings window
 
 `atticus-ctl settings` opens a window over the same settings Atticus the
 voice assistant reads (`~/.config/atticus/settings.json`): shortcuts, the
 model, safety, privacy, the dictation dictionary and history, saved rules,
-usage and the feedback form all work from it. Four macOS-only sections carry
-over as explained text rather than a working control, until each gets its
-own pass: background agents (Automation/Calendar/"Enable All"), the meeting
-recorder, the Whisper model download manager (set `asrModel` by hand for
-now), and Contacts/Mail import.
+usage, the feedback form and the "About you" import (your account name, your
+own contact card and the addresses of your mail program) all work from it.
+Saved meetings are listed, opened, copied, exported and deleted there too.
+Settings → General also picks the speech model that runs on this computer
+(Tiny to Large v3 Turbo), downloads it, and deletes the ones you no longer
+want.
 
 Native click and typing need `ydotool`, which only works once your user is in
 the `input` group — `build.sh` adds you to it, but that takes effect on your
@@ -126,7 +125,7 @@ install.
 
 ## Usage
 
-Press `Ctrl+Alt+Space`, speak, then press again to send. The answer streams into
+Press `Super+Alt+A`, speak, then press again to send. The answer streams into
 the panel and is read aloud.
 
 Close the panel with its `X` button, with `Esc` (click the panel first), or let
@@ -169,6 +168,14 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `browser` | first found | Which Chromium browser Atticus drives for websites: `"brave"`, `"chromium"`, `"google-chrome-stable"`. |
 | `browserPort` | `9247` | Local port Atticus's own browser window listens on. |
 | `safe` | `true` | Sandbox and Allow cards (see Safety). |
+| `agents` | `true` | Let long requests move to a background agent (see Background agents). `false` keeps every request in the box. |
+| `agentsHidden` | `false` | Keep agent chips off the screen (for a presentation); results arrive as notifications. |
+| `draw` | `true` | Let Atticus draw guides over the desktop (see Drawing on the screen). |
+| `calendarDirs` | `[]` | More calendar folders, or single `.ics` files (read-only). |
+| `calendarFeeds` | `[]` | Addresses of `.ics` feeds to read, as `{"name": "...", "url": "https://..."}`. |
+| `calendarDefault` | `"atticus"` | The calendar new events go to (an `id` from the calendar list). |
+| `contactsDirs` | `[]` | More folders or `.vcf` files to read contacts from. |
+| `myCard` | account name | The name on your own contact card. |
 | `haUrl`, `haToken` | unset | Home Assistant address and a long-lived access token, for smart-home control. |
 | `micFix` | `true` | Set a sane capture volume at startup. |
 | `micVolume` | `45` | Capture volume percent when `micFix` is on. |
@@ -230,20 +237,15 @@ MIT. See [LICENSE](LICENSE).
 
 ## Dictation
 
-Say it and it is typed where the cursor is, in any app. Bind a key to
-`atticus-ctl dictate` in `~/.config/hypr/bindings.lua` (press to start, press
-again to finish; a pause of a couple of seconds finishes it too):
+Say it and it is typed where the cursor is, in any app. Press `Super+Alt+D`
+to start and again to finish; a pause of a couple of seconds finishes it too.
+The keys run `atticus-ctl dictate`.
+
+For hold-to-dictate instead, bind the key's press and release yourself in
+`~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("CTRL + ALT + D", "Dictate", "/home/youruser/.local/bin/atticus-ctl dictate")
-```
-
-For true hold-to-dictate instead, bind the key's down and up events straight
-through Hyprland (`o.bind` only fires once per press):
-
-```
-bind  = CTRL ALT, D, exec, atticus-ctl dictate-press
-bindr = CTRL ALT, D, exec, atticus-ctl dictate-release
+o.bind_hold("SUPER + ALT + D", "Dictate", "atticus-ctl dictate-press", "Dictate (done)", "atticus-ctl dictate-release")
 ```
 
 The words are tidied first (punctuation, names, false starts). One line is
@@ -267,3 +269,91 @@ tabs and sign-ins are never touched. A site that needs an account has to be
 signed into once in Atticus's window. Sending, buying, deleting and other
 clicks that cannot be undone ask first.
 
+## Background agents
+
+A request that takes long (its tools have been running for 15 seconds) moves
+to the background by itself and the box is free for the next one. Each
+background task shows as a chip at the top-right corner: what it is doing, a
+question when it needs you, the result when it is done. Up to three work at
+once; more wait their turn.
+
+```bash
+atticus-ctl agents                 # the window with every task, its steps, result and follow-up field
+atticus-ctl agent "pesquise ..."   # start a background task straight away
+atticus-ctl move                   # send what the box is working on to the background now
+```
+
+Clicking "N agents" in the box opens the same window.
+
+## Calendar
+
+"O que tenho amanhã?", "marca dentista sexta às 14h", "passa a reunião de
+segunda para as 16h". Events are iCalendar files, one per event, the layout
+`khal` and `vdirsyncer` use:
+
+- `~/.config/atticus/calendar/` is Atticus's own calendar; new events go there.
+- Every folder under `~/.calendars/` is a calendar, changed in place. Point
+  `vdirsyncer` at it to sync with a server.
+- `calendarFeeds` reads a calendar from its `.ics` address (the private
+  address a web calendar gives out), read-only, refreshed every 15 minutes.
+
+Moving or deleting an event always asks first, and touches only that day of a
+repeating event.
+
+## Contacts
+
+Put `.vcf` files in `~/.config/atticus/contacts/` (an export from a phone or a
+web address book is one file with every card). `~/.contacts/` is read too.
+They are only read, never changed. "Qual o telefone da Ana?" and "manda um
+e-mail pro João" look names up there.
+
+## Drawing on the screen
+
+"Onde eu clico para exportar?" or "me explica o teorema de Pitágoras
+desenhando": Atticus looks at the screen and draws over it, with a caption
+that is read aloud. A "click here" step moves on when you click the marked
+place; "próximo", "volta" and "fecha" work by voice, and the caption has the
+same buttons. Nothing is clicked for you.
+
+```bash
+atticus-ctl draw-next | draw-back | draw-close
+```
+
+## Meetings
+
+`atticus-ctl meeting` opens the meeting panel. Write or paste what the call
+is about (or let it read your next calendar event), then start listening. It
+writes down what the others say (what the computer plays) and what you say
+(the microphone) separately, and when someone asks a question it suggests an
+answer from your notes. In a room with no call, choose "In person" and the
+microphone hears everyone.
+
+A line appears about 3 seconds after the person stops talking; words are not
+shown while they are being said. The wake word is off during a call. With
+`meetingSave` on (the default) the transcript, your notes and a recap are kept
+in `~/.config/atticus/meetings/` and listed in Settings; nothing is sent
+anywhere except the questions answered by the AI.
+
+```bash
+atticus-ctl meeting        # open the panel
+atticus-ctl meeting-stop   # stop listening (a panel with nothing heard closes)
+```
+
+## First run
+
+`atticus-ctl setup` opens the setup window: what is installed and what is
+missing (recorder, recognizer, ydotool, grim, the AI client and its sign-in),
+the feature switches, and a first try of the shortcut. It opens by itself the
+first time Atticus runs with no settings file.
+
+## When it does not understand
+
+Look at the log first: `journalctl --user -u atticus | grep '\[voice\]'`.
+`heard ... by='local'` means the speech server (Home Assistant) could not be
+reached and the small model on this machine took over; the line
+`speech server unreachable: <why>` says why, and the box says so once. With a
+fan running by the desk, the same twelve commands at the same loudness as the
+fan were heard with 41% of the words wrong by the server and 80% by the local
+model (56% after the low rumble is cut, which the local path does). A voice
+10 dB above the fan: 11% by the server, 13% by the local model. If the server is reached over Tailscale,
+keep `tailscaled` enabled at boot.

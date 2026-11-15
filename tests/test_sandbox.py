@@ -21,7 +21,7 @@ class Classify(unittest.TestCase):
             "wpctl get-volume @DEFAULT_AUDIO_SINK@", "playerctl pause", "brightnessctl set 50%", "notify-send Atticus 'pronto'",
             "date +%H:%M", "echo oi", "hyprctl -j clients", "nmcli radio wifi off", "bluetoothctl power on",
             f"{ME} --window kitty | head -20", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null", "open -a Firefox",
-            "mdfind -name curriculo | head -5", "playerctl metadata 2>&1 | grep -i title", "systemctl --user status atticus",
+            "findfile -name curriculo | head -5", "playerctl metadata 2>&1 | grep -i title", "systemctl --user status atticus",
         ]:
             self.assertEqual(c(cmd), "allow", cmd)
 

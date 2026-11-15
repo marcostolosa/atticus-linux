@@ -206,11 +206,31 @@ def voice_rms(samples: np.ndarray) -> float:
     return float(np.sqrt(2.0 * power[first:].sum()) / n)
 
 
-# The rumble is cut only for measuring loudness. The recognizer gets the
-# recording as it is: on real recordings mixed with real air-conditioner
-# noise, every cleaning tried before Whisper (rumble cut, voice band-pass,
-# a neural denoiser) made it understand fewer commands than leaving the
-# noise in, as studies of denoising in front of Whisper also report.
+# The server's recognizer gets the recording as it is: on real recordings
+# mixed with real air-conditioner noise, every cleaning tried before Whisper
+# (rumble cut, voice band-pass, a neural denoiser) made it understand fewer
+# commands than leaving the noise in, as studies of denoising in front of
+# Whisper also report.
+#
+# The small model on this machine is the exception, for the rumble alone.
+# With a fan running by the desk (2026-11-15: 81% of the microphone's energy
+# below 150 Hz), 12 spoken commands, the piper voice mixed with 30 s of that
+# fan, local model with vocabulary, words heard wrong:
+#     voice 10 dB above the fan    18.5% as it is    13.0% with the rumble cut
+#     voice as loud as the fan     79.6%             55.6%
+#     voice 6 dB below it          92.6%             96.3%   (lost either way)
+# Repeat it with: tools/stt_bench.py --noise ROOM.raw --engines local+vocab,local+rumble
+
+
+def cut_rumble(audio: np.ndarray, hz: float = RUMBLE_HZ) -> np.ndarray:
+    """The recording without what is below the voice: nothing under 60% of
+    `hz`, everything above it, a slope between so no ringing is added."""
+    if audio.size < 64:
+        return audio
+    spectrum = np.fft.rfft(audio)
+    freq = np.fft.rfftfreq(audio.size, 1.0 / SAMPLE_RATE)
+    spectrum *= np.clip((freq - hz * 0.6) / (hz * 0.4), 0.0, 1.0)
+    return np.fft.irfft(spectrum, audio.size).astype(np.float32)
 
 
 def level_audio(audio: np.ndarray, target: float = 0.25) -> np.ndarray:
@@ -292,6 +312,15 @@ class RemoteWhisper:
         self._checked = 0.0
         self._down_until = 0.0
         self._lock = threading.Lock()
+        self.down = ""   # why the server cannot be used right now ('' while it can)
+
+    def _mark(self, why: str) -> None:
+        """Say in the log when the server is lost and when it is back: the
+        local model understands far less, and that should never be a mystery."""
+        why = why[:160]
+        if bool(why) != bool(self.down):
+            print(f"[voice] speech server {'unreachable: ' + why + '; using the model on this machine' if why else 'answering again'}", flush=True)
+        self.down = why
 
     @staticmethod
     def _conf():
@@ -325,8 +354,10 @@ class RemoteWhisper:
                 if want:
                     self._request("/api/stt/" + want, timeout=4)   # it answers: usable
                 self._entity, self._checked = want, time.monotonic()
-            except Exception:
+                self._mark("" if want else "it lists no speech-to-text service")
+            except Exception as e:
                 self._entity, self._down_until = None, time.monotonic() + 60
+                self._mark(str(getattr(e, "reason", e)) or type(e).__name__)
             return self._entity
 
     def transcribe(self, audio: np.ndarray, language: str) -> Optional[str]:
@@ -349,8 +380,9 @@ class RemoteWhisper:
                                                              f"channel=1; language={language}"})
             if isinstance(out, dict) and out.get("result") == "success":
                 return str(out.get("text") or "").strip()
-        except Exception:
-            pass
+            self._mark("it did not transcribe the audio")
+        except Exception as e:
+            self._mark(str(getattr(e, "reason", e)) or type(e).__name__)
         self._down_until = time.monotonic() + 60   # do not make the next minute of requests wait on a dead server
         return None
 
@@ -363,12 +395,13 @@ class Transcriber:
         # while staying fast with int8 on CPU.
         # Settings "asrModel": "base" answers about 2 s sooner on a laptop CPU
         # but mishears more; "small" is the default; a GPU host can go larger.
-        self.model_size = (model_size or os.environ.get("ATTICUS_WHISPER_MODEL")
-                           or _setting("asrModel") or "small")
+        self._pinned = model_size or os.environ.get("ATTICUS_WHISPER_MODEL")
+        self.model_size = self._pinned or _setting("asrModel") or "small"
         # Language is configurable (public repo): "auto" detects per utterance,
         # or pin it (e.g. "pt", "en") to remove detection errors on short clips
         # and decode that language far better. Default auto so any user is served;
         # this install pins pt in settings.json for best Brazilian-Portuguese.
+        self._pinned_language = language
         if language is None:
             language = _setting("asrLanguage", "auto")
         self.language = None if str(language).lower() == "auto" else language
@@ -380,6 +413,12 @@ class Transcriber:
 
     def load(self):
         with self._lock:
+            wanted = self._pinned or _setting("asrModel") or "small"
+            if wanted != self.model_size:   # changed in Settings: the next load is the new one
+                self.model_size, self._model = wanted, None
+            if self._pinned_language is None:
+                language = str(_setting("asrLanguage", "auto"))
+                self.language = None if language.lower() == "auto" else language
             if self._model is not None:
                 return
             from faster_whisper import WhisperModel
@@ -405,14 +444,15 @@ class Transcriber:
     def transcribe(self, audio: np.ndarray, language: Optional[str] = None) -> str:
         if audio.size < SAMPLE_RATE // 4:   # < 0.25s: nothing useful was said
             return ""
-        audio = level_audio(audio)
         lang = self._remote_language(language)
-        text = self.remote.transcribe(audio, lang)
+        text = self.remote.transcribe(level_audio(audio), lang)
         if text is not None:
             self.last_language, self.last_engine = lang, "remote"
             return text
         self.last_engine = "local"
-        return self.transcribe_local(audio, language, vocabulary() if _setting("asrBias", True) else [])
+        if _setting("localRumbleCut", True):   # before levelling: the gain is then set by the voice, not by the fan
+            audio = cut_rumble(audio)
+        return self.transcribe_local(level_audio(audio), language, vocabulary() if _setting("asrBias", True) else [])
 
     def transcribe_local(self, audio: np.ndarray, language: Optional[str] = None,
                          names: Optional[list[str]] = None) -> str:

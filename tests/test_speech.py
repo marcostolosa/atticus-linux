@@ -56,3 +56,16 @@ class RecorderCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RumbleCutTest(unittest.TestCase):
+    def test_takes_the_fan_and_leaves_the_voice(self):
+        import numpy as np
+        from atticus_shell import speech
+        t = np.arange(16000) / 16000
+        fan, voice = 0.3 * np.sin(2 * np.pi * 60 * t), 0.05 * np.sin(2 * np.pi * 400 * t)
+        out = speech.cut_rumble((fan + voice).astype(np.float32))
+        self.assertEqual(out.size, 16000)
+        self.assertLess(float(np.sqrt(np.mean((out - voice) ** 2))), 0.002)   # what is left is the voice
+        only_voice = speech.cut_rumble(voice.astype(np.float32))
+        self.assertLess(float(np.max(np.abs(only_voice - voice))), 0.001)       # and a voice alone is untouched

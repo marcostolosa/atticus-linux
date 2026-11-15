@@ -215,9 +215,9 @@ body.reduce *{animation:none!important;transition:none!important}
 
 <footer id="askbar" hidden><div class="chips"><button data-ask="What did I miss?">Catch me up</button><button id="screen">Explain the screen</button></div><form id="askform"><input id="ask" placeholder="Ask about the call…" aria-label="Ask about the call" maxlength="1500" autocomplete="off"><button id="send" type="button" aria-label="Ask by voice" title="Ask by voice"><b>↑</b><svg class="mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button></form><div id="voicebar" hidden><p id="heard" class="waiting">Listening…</p><button id="voicein" aria-label="Type instead" title="Click to type instead"><span id="askwave" aria-hidden="true"></span></button><button id="voicesend" class="blue" aria-label="Send">↑</button></div></footer>
 
-<section id="ended" hidden><h1 id="endtitle">Your meeting</h1><p class="note" id="endnote">Saved on this Mac.</p><div id="recap" hidden></div><button id="endcopy" class="quiet big">Copy transcript</button><button id="allmeetings" class="quiet big">See all meetings →</button><button id="resume" class="blue big">Resume listening</button><div class="bar" style="margin-top:8px"><button id="save">Done</button><button id="delete">Delete meeting</button></div></section>
+<section id="ended" hidden><h1 id="endtitle">Your meeting</h1><p class="note" id="endnote">Saved on this computer.</p><div id="recap" hidden></div><button id="endcopy" class="quiet big">Copy transcript</button><button id="allmeetings" class="quiet big">See all meetings →</button><button id="resume" class="blue big">Resume listening</button><div class="bar" style="margin-top:8px"><button id="save">Done</button><button id="delete">Delete meeting</button></div></section>
 
-<p id="notice" hidden>Atticus hears this call and your microphone. Transcripts stay on this Mac.</p>
+<p id="notice" hidden>Atticus hears this call and your microphone. Transcripts stay on this computer.</p>
 <div id="toast" role="status" hidden></div>
 <script type="text/plain" id="orbsrc">/*ORBS*/</script>
 <script type="module">
@@ -333,8 +333,8 @@ function card(row){
 document.addEventListener('click',e=>{if(!e.target.closest('.attachment'))document.querySelectorAll('.attachment.expanded').forEach(b=>b.classList.remove('expanded'))});
 window.meeting={
   privacy(on){saving=on;this.mode()},
-  mode(m){if(m)for(const b of $('mode').children)b.setAttribute('aria-pressed',String(b.dataset.mode===m));document.querySelector('#prep h1').textContent=room()?'Get ready for your meeting':'Get ready for your call';$('notice').textContent=(room()?'Atticus hears the room through your microphone.':'Atticus hears this call and your microphone.')+' Transcripts stay on this Mac.'},
-  saving(on){saving=on;document.body.classList.toggle('saved',on);show('saving',running&&!minimized&&on);$('endnote').textContent=on?'Saved on this Mac.':'This transcript isn’t saved. Copy it before closing. Enable saving in Settings for future meetings.';$('delete').disabled=!on;$('restore').title=on?'Restore · Saving transcript':'Restore'},
+  mode(m){if(m)for(const b of $('mode').children)b.setAttribute('aria-pressed',String(b.dataset.mode===m));document.querySelector('#prep h1').textContent=room()?'Get ready for your meeting':'Get ready for your call';$('notice').textContent=(room()?'Atticus hears the room through your microphone.':'Atticus hears this call and your microphone.')+' Transcripts stay on this computer.'},
+  saving(on){saving=on;document.body.classList.toggle('saved',on);show('saving',running&&!minimized&&on);$('endnote').textContent=on?'Saved on this computer.':'This transcript isn’t saved. Copy it before closing. Enable saving in Settings for future meetings.';$('delete').disabled=!on;$('restore').title=on?'Restore · Saving transcript':'Restore'},
   recap(m){$('recap').textContent=m.summary+(m.action_items?.length?'\n\nAction items\n'+m.action_items.map(s=>'• '+s).join('\n'):'');show('recap',!!m.summary);if(!running)fit()},
   settled(id){if(id!==viewTransition)return;document.body.classList.remove('transitioning');document.body.classList.add('revealing')},
   compact(on){if(!running)return;if(on)voice(false);minimized=on;show('notice',false);show('toast',false);document.body.classList.toggle('compact',on);view(on?'pillow':'live');if(!on)$('ask').focus()},

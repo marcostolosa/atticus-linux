@@ -53,7 +53,7 @@
   #back, #skip-all { position: absolute; z-index: 10; top: 18px; margin: 0; padding: 0 10px; height: 30px; color: var(--fg2); background: transparent; box-shadow: none; }
   #back { left: 22px; } #skip-all { right: 22px; }
 
-  /* permissions list, grouped like System Settings */
+  /* the list of what Atticus uses, in groups */
   #list, .list { width: 100%; max-width: 480px; margin-top: 22px; border-radius: 12px; background: var(--card); text-align: left;
     box-shadow: inset 0 0 0 .5px var(--line), 0 1px 3px rgba(0,0,0,.04); overflow: hidden; }
   .row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; opacity: 0; transform: translateY(8px);
@@ -363,14 +363,14 @@
 <section class="page" id="welcome">
   <div id="orbwrap" class="r"><canvas id="orb"></canvas></div>
   <h1 class="r">Meet Atticus</h1>
-  <p class="sub r" id="welcome-talk">Hold the shortcut, say what you need, let go. Your Mac does the rest.</p>
-  <div class="keys r" id="welkeys"><div class="key">⌃</div><div class="key">⌥</div><div class="key wide">Space</div></div>
+  <p class="sub r" id="welcome-talk">Hold the shortcut, say what you need, let go. Your computer does the rest.</p>
+  <div class="keys r" id="welkeys"><div class="key">Super</div><div class="key">Alt</div><div class="key">A</div></div>
   <button class="btn r" data-go="perms">Get Started</button>
 </section>
 
 <section class="page" id="perms">
   <h2 class="r">Give Atticus a hand</h2>
-  <p class="sub r">macOS asks once for each one. You can change them any time in System Settings.</p>
+  <p class="sub r">Each one is a program Atticus uses. A missing one says what to install.</p>
   <div id="list" class="r"></div>
   <div id="count" class="r"></div>
   <button class="btn quiet r" id="next" data-go="agents">Skip for Now</button>
@@ -381,7 +381,7 @@
   <p class="sub r">Hand off a bigger task and keep asking. An agent uses these only when a task needs them.</p>
   <div class="cap r">Atticus turns these on</div>
   <div class="list r" id="own"></div>
-  <div class="cap r">Only you can allow these. macOS and Claude ask you directly.</div>
+  <div class="cap r">Only you can set these up. Claude asks you directly.</div>
   <div class="list r" id="yours"></div>
   <div class="bar2 r"><button class="btn quiet" data-go="try" id="agents-next">Skip for Now</button><button class="btn" id="enable">Enable All</button></div>
 </section>
@@ -389,22 +389,22 @@
 <section class="page" id="try">
   <h2 class="r">Try it now</h2>
   <p class="sub r" id="try-talk">Hold the keys anywhere, say what you need, then let go. Try one now.</p>
-  <div class="keys big r" id="trykeys"><div class="key">⌃</div><div class="key">⌥</div><div class="key wide">Space</div></div>
+  <div class="keys big r" id="trykeys"><div class="key">Super</div><div class="key">Alt</div><div class="key">A</div></div>
   <div id="hint" class="r">Hold the keys and say “open Calculator”.</div>
   <div class="bar2 r"><button class="btn quiet" data-go="mac" id="try-skip">Skip</button><button class="btn" data-go="mac" id="try-next" hidden>Next</button></div>
 </section>
 
 <section class="page" id="mac">
-  <div class="kicker r">Your whole Mac, by voice</div>
+  <div class="kicker r">Your whole desktop, by voice</div>
   <h2 class="r">Say it. It’s done.</h2>
   <p class="sub r">Run apps, arrange windows and play music in the background. When the work is out of sight, a live mini screen shows it; click it to open that window.</p>
   <div class="stage r" id="macstage" aria-hidden="true">
-    <div class="mw" id="mw-chrome"><div class="tb"><i></i><i></i><i></i><span>Chrome</span></div><div class="ln"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:75%"></div></div>
-    <div class="mw" id="mw-notes"><div class="tb"><i></i><i></i><i></i><span>Notes</span></div><div class="ln" style="width:50%"></div><div class="ln"></div></div>
+    <div class="mw" id="mw-chrome"><div class="tb"><span>Chromium</span></div><div class="ln"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:75%"></div></div>
+    <div class="mw" id="mw-notes"><div class="tb"><span>Obsidian</span></div><div class="ln" style="width:50%"></div><div class="ln"></div></div>
     <div class="fake gone2" id="mac-play"><b></b><div>Lo-fi beats<small>Spotify</small></div><div class="eq"><i></i><i></i><i></i></div></div>
-    <div class="fake gone2" id="mac-box"><div class="q" id="mac-q">“Chrome left, Notes right”</div><div id="mac-mini"><span>Spotify · Live</span><b>Lo-fi beats</b><div class="eq"><i></i><i></i><i></i></div></div><span id="mac-a">Done.</span></div>
+    <div class="fake gone2" id="mac-box"><div class="q" id="mac-q">“Chromium left, Obsidian right”</div><div id="mac-mini"><span>Spotify · Live</span><b>Lo-fi beats</b><div class="eq"><i></i><i></i><i></i></div></div><span id="mac-a">Done.</span></div>
   </div>
-  <div class="says r"><i>“Open Spotify and play lo-fi”</i><i>“Make Chrome full screen”</i><i>“Volume to 30%”</i><i>“Turn on dark mode”</i></div>
+  <div class="says r"><i>“Open Spotify and play lo-fi”</i><i>“Make Chromium full screen”</i><i>“Volume to 30%”</i><i>“Turn on night light”</i></div>
   <div class="done-note r" id="safe-note">Safe mode is on: deleting, sending or buying asks you first.</div>
   <div class="bar2 r"><button class="btn quiet" data-go="text">Skip</button><button class="btn" data-go="text">Next</button></div>
 </section>
@@ -430,7 +430,7 @@
     <div id="dc-doc"><small>To: Sam</small><span id="dc-words"></span><i id="dc-caret"></i></div>
     <span id="dc-said"></span>
     <div class="fake gone2" id="dc-pill"><span class="wv"><i></i><i></i><i></i><i></i><i></i></span><span class="orb"></span><svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="11"/><path d="M6.5 11.3l3 3 6-6.3"/></svg></div>
-    <div class="key" id="dc-key">fn</div>
+    <div class="key" id="dc-key">D</div>
   </div>
   <div class="says r" id="dc-ex" role="group" aria-label="Clean up examples"></div>
   <div class="mt-row r"><div class="ic" style="background:#ff9f0a"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></div>
@@ -446,12 +446,12 @@
   <h2 class="r">It shows you, right on screen</h2>
   <p class="sub r">Ask how to do something and Atticus marks each spot, one step at a time. Ask it to explain something and draw it, and the drawing builds up like a whiteboard.</p>
   <div class="stage r" id="ptstage" aria-hidden="true">
-    <div id="pt-win"><div class="tb"><i></i><i></i><i></i></div>
-      <div class="it"><b style="background:#8e8e93"></b>General</div>
-      <div class="it"><span id="pt-spot"><b style="background:#0a84ff"></b>Appearance<span id="pt-ring"></span></span></div>
-      <div class="it"><b style="background:#ff9f0a"></b>Notifications</div>
-      <div class="it"><b style="background:#30d158"></b>Battery</div></div>
-    <div class="fake gone2" id="pt-box"><div class="q">“how do I turn on dark mode?”</div><div id="pt-ans">Step 1 of 2: click Appearance.</div></div>
+    <div id="pt-win"><div class="tb"></div>
+      <div class="it"><b style="background:#8e8e93"></b>Learn</div>
+      <div class="it"><span id="pt-spot"><b style="background:#0a84ff"></b>Style<span id="pt-ring"></span></span></div>
+      <div class="it"><b style="background:#ff9f0a"></b>Setup</div>
+      <div class="it"><b style="background:#30d158"></b>Update</div></div>
+    <div class="fake gone2" id="pt-box"><div class="q">“how do I change the theme?”</div><div id="pt-ans">Step 1 of 2: click Style.</div></div>
     <svg id="pt-lead"><defs><linearGradient id="pt-ink" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0a84ff" stop-opacity=".1"/><stop offset="1" stop-color="#0a84ff"/></linearGradient></defs><line pathLength="1"/></svg>
     <svg id="wb" width="220" height="146"><g data-s="1"><path class="tr" pathLength="1" d="M30 26V122H150Z"/><path d="M30 110h12v12"/></g>
       <g data-s="2"><text x="14" y="79">a</text><text x="86" y="140">b</text><text x="98" y="68">c</text></g>
@@ -468,7 +468,7 @@
 <section class="page" id="work">
   <div class="kicker r">Your plan, your pace</div>
   <h2 class="r">Quick asks stay quick</h2>
-  <p class="sub r"><span id="wk-plan">Choose how much of your plan Atticus uses. </span>A long ask moves to a background agent by itself, so you keep working. ⌃⌥↩ moves one sooner.</p>
+  <p class="sub r"><span id="wk-plan">Choose how much of your plan Atticus uses. </span>A long ask moves to a background agent by itself, so you keep working.</p>
   <div class="stage r" aria-hidden="true">
     <div class="fake gone2" id="wk-box"><div class="q">“Find standing desks under $600”</div><div id="wk-line">Searching the web…</div></div>
     <div class="fake gone2" id="wk-chip"><small id="wk-state">Agent · working</small><b>Standing desks</b><u></u></div>
@@ -482,11 +482,11 @@
 <section class="page" id="meeting">
   <div class="kicker r">Meeting Copilot · Beta</div>
   <h2 class="r">Answers while you’re on the call</h2>
-  <p class="sub r">Hear the call, get help with questions, then revisit transcripts, recaps and action items in Settings → Meetings. Saved on this Mac.</p>
+  <p class="sub r">Hear the call, get help with questions, then revisit transcripts, recaps and action items in Settings → Meetings. Saved on this computer.</p>
   <div class="stage r" aria-hidden="true">
     <div id="mt-call"><div data-n="Dana" id="mt-dana"></div><div data-n="Lee"></div></div>
     <div class="fake" id="mt-panel">
-      <div class="hd"><i></i>Listening · <span id="mt-clock">12:04</span></div><div id="mt-save">Saving transcript on this Mac</div><div id="mt-archive" hidden><b>Your meeting</b><p>Pilot budget approved: $18,000.</p><small>Action item · Send the notes</small></div>
+      <div class="hd"><i></i>Listening · <span id="mt-clock">12:04</span></div><div id="mt-save">Saving transcript on this computer</div><div id="mt-archive" hidden><b>Your meeting</b><p>Pilot budget approved: $18,000.</p><small>Action item · Send the notes</small></div>
       <div class="mt-card gone2" id="mt-q"><small>12:05</small><p>What budget did we approve?</p>
         <span class="mt-think" id="mt-think">Thinking…</span><div class="mt-ans" id="mt-ans"><b>The approved budget is $18,000.</b></div></div>
     </div>
@@ -507,7 +507,7 @@
     <div class="row"><div class="ic" style="background:#30d158"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
       <div class="txt"><b>Anonymous</b><span>A random ID. Never your name, your screen, your files or passwords.</span></div></div>
     <div class="row"><div class="ic" style="background:#8e8e93"><svg viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 9 6 9 6a15 15 0 0 1-2.7 3.2M6.6 7.6A15 15 0 0 0 3 12s4 6 9 6a9 9 0 0 0 3.4-.7"/></svg></div>
-      <div class="txt"><b>Cleaned first</b><span>Emails, numbers, file paths and anything typed for you are removed before it leaves your Mac.</span></div></div>
+      <div class="txt"><b>Cleaned first</b><span>Emails, numbers, file paths and anything typed for you are removed before it leaves your computer.</span></div></div>
   </div>
   <div class="bar2 r"><button class="btn quiet" data-improve="false">Not Now</button><button class="btn" data-improve="true">Help Improve</button></div>
 </section>
@@ -517,7 +517,7 @@
   <h2 class="r">Atticus is free and open source</h2>
   <p class="sub r">If you ever find yourself enjoying Atticus, a small tip goes a long way. It keeps Atticus free for everyone, and it would really support me.</p>
   <div class="bar2 r"><button class="btn" id="kofi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"/></svg>Leave a Tip</button><button class="btn quiet" data-go="done" id="tip-next">Next</button></div>
-  <p class="done-note r">You can always find “Leave a Tip” in the menu bar later.</p>
+  <p class="done-note r"></p>
 </section>
 
 <section class="page" id="done">
@@ -525,19 +525,19 @@
   <div class="r" id="ideas">
     <div id="core" aria-hidden="true"><canvas id="orb-done"></canvas></div>
     <ul aria-label="Things to try">
-      <li class="idea left" style="--x:25%;--y:15px;--i:10;--c:#a2845e"><span><b><svg viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3.5L7 20z"/></svg></b>“Remember I use Chrome”</span></li>
+      <li class="idea left" style="--x:25%;--y:15px;--i:10;--c:#a2845e"><span><b><svg viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3.5L7 20z"/></svg></b>“Remember I use Chromium”</span></li>
       <li class="idea right" style="--x:70%;--y:15px;--i:11;--c:#ff453a"><span><b><svg viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></b>“Tell me when the download finishes”</span></li>
-      <li class="idea left" style="--x:20%;--y:53px;--i:6;--c:#0a84ff"><span><b><svg viewBox="0 0 24 24"><rect x="3" y="5" width="8" height="14" rx="1.5"/><rect x="13" y="5" width="8" height="14" rx="1.5"/></svg></b>“Chrome left, Terminal right”</span></li>
+      <li class="idea left" style="--x:20%;--y:53px;--i:6;--c:#0a84ff"><span><b><svg viewBox="0 0 24 24"><rect x="3" y="5" width="8" height="14" rx="1.5"/><rect x="13" y="5" width="8" height="14" rx="1.5"/></svg></b>“Chromium left, Terminal right”</span></li>
       <li class="idea right" style="--x:77%;--y:53px;--i:7;--c:#ff375f"><span><b><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg></b>“How do I export this as a PDF?”</span></li>
       <li class="idea left" style="--x:22%;--y:91px;--i:0;--c:#30d158"><span><b><svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg></b>“Play my playlist”</span></li>
-      <li class="idea right" style="--x:79%;--y:91px;--i:1;--c:#636366"><span><b><svg viewBox="0 0 24 24"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></svg></b>“Turn on dark mode”</span></li>
+      <li class="idea right" style="--x:79%;--y:91px;--i:1;--c:#636366"><span><b><svg viewBox="0 0 24 24"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></svg></b>“Turn on night light”</span></li>
       <li class="idea left" style="--x:18%;--y:129px;--i:2;--c:#bf5af2"><span><b><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.5"/></svg></b>“What’s on my screen?”</span></li>
-      <li class="idea right" id="idea-dict" style="--x:75%;--y:129px;--i:3;--c:#ff9f0a"><span><b><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></b>Hold<span id="idea-key"><kbd>fn</kbd></span>to dictate</span></li>
+      <li class="idea right" id="idea-dict" style="--x:75%;--y:129px;--i:3;--c:#ff9f0a"><span><b><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></b>Press<span id="idea-key"><kbd>D</kbd></span>to dictate</span></li>
       <li class="idea left" style="--x:22%;--y:167px;--i:4;--c:#30d158"><span><b><svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></b>“Pause the music”</span></li>
       <li class="idea right" style="--x:79%;--y:167px;--i:5;--c:#ff375f"><span><b><svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"/></svg></b>“Explain this and draw it”</span></li>
       <li class="idea left" style="--x:21%;--y:205px;--i:8;--c:#8e8e93"><span><b><svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></b>“Read your answers aloud”</span></li>
       <li class="idea right" style="--x:77%;--y:205px;--i:9;--c:#30b0c7"><span><b><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></b>“Best headphones under $200?”</span></li>
-      <li class="idea left" style="--x:27%;--y:243px;--i:12;--c:#5e5ce6"><span><b><svg viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg></b>“When I say work mode, open Notes”</span></li>
+      <li class="idea left" style="--x:27%;--y:243px;--i:12;--c:#5e5ce6"><span><b><svg viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg></b>“When I say work mode, open Obsidian”</span></li>
       <li class="idea right" style="--x:75%;--y:243px;--i:13;--c:#d97757"><span><b><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></b>“Compare the top 3 laptops”</span></li>
       <li class="idea right" style="--x:50%;--y:281px;--i:14;--c:#30b0c7"><span><b><svg viewBox="0 0 24 24"><path d="M4 7h15l-3-3M20 17H5l3 3"/></svg></b>“Convert this JPEG to PNG”</span></li>
     </ul>
@@ -613,22 +613,22 @@
     if (!recording) dcKeys(prefs.dictateHotkeyLabel || '', 'Record Shortcut');
     if (prefs.hotkeyLabel && prefs.hotkeyLabel !== talkLabel) {   // the talk shortcut as set; redrawn only when it changes, so held keys stay lit
       talkLabel = prefs.hotkeyLabel;
-      const caps = () => capsOf(talkLabel).map(c => Object.assign(document.createElement('div'), { className: c.length > 3 ? 'key wide' : 'key', textContent: c }));
+      const caps = () => capsOf(talkLabel).map(c => Object.assign(document.createElement('div'), { className: c === 'Space' ? 'key wide' : 'key', textContent: c }));
       $('welkeys').replaceChildren(...caps()); $('trykeys').replaceChildren(...caps());
     }
     const key = prefs.dictateHotkeyLabel;
-    $('dc-sub').textContent = key ? `Hold ${key} to talk. Double-tap to lock.` : 'Give dictation a shortcut. Hold it to talk, double-tap to lock.';
-    $('dc-key').textContent = key || 'fn'; $('dc-globe').hidden = !prefs.globeTaken;
+    $('dc-sub').textContent = key ? `Press ${key} to start. Press again to finish.` : 'Give dictation a shortcut. Press it to start and again to finish.';
+    $('dc-key').textContent = key ? key.split('+').pop() : 'D'; $('dc-globe').hidden = !prefs.globeTaken;
     $('idea-dict').hidden = !key; $('idea-key').replaceChildren(...capsOf(key || '').map(c => Object.assign(document.createElement('kbd'), { textContent: c })));
     $('dc-mode').classList.toggle('dim', !prefs.dictateHotkeyLabel);
     document.querySelector('[data-k=dictateMode] [data-v=cleanup]').disabled = other;
     $('dc-mode-hint').textContent = other ? 'Clean up needs Claude.' : 'Clean up tidies it as shown. Verbatim types every word.';
-    $('mt-hint').textContent = other ? `With ${NAMES[provider]}, it saves the transcript on this Mac. Answers and recaps need Claude.` : 'Then start it from the menu bar when a call begins.';
+    $('mt-hint').textContent = other ? `With ${NAMES[provider]}, it saves the transcript on this computer. Answers and recaps need Claude.` : 'Then start it with atticus-ctl meeting when a call begins.';
   };
   document.querySelectorAll('.seg[data-k]').forEach(g => g.querySelectorAll('button').forEach(b => b.onclick = () => {
     prefs[g.dataset.k] = b.dataset.v; paintPrefs(); post({ do: 'set', k: g.dataset.k, v: b.dataset.v });
   }));
-  // Dictation's shortcut: Atticus.swift records the next keys (the same recorder as Settings) and answers with ob.rec / ob.taken / ob.recorded.
+  // Dictation's shortcut: the page reads the next keys and sends them; the answer is ob.taken or ob.recorded.
   let recording = false, dcWarn = 0;
   const dcHint = () => prefs.dictateHotkeyLabel ? 'In any text field, your words land at the cursor.' : 'Click, then press the keys you want.';
   const dcKeys = (label, text) => {
@@ -636,28 +636,46 @@
     $('dc-field').classList.toggle('set', !!label && !recording); $('dc-clear').hidden = !label || recording;
     if (!dcWarn && !recording) { $('dc-hint').textContent = dcHint(); $('dc-hint').className = ''; }
   };
-  const capsOf = label => { const m = label.match(/^((?:fn|[⌃⌥⇧⌘])*)(.*)$/); return (m[1].match(/fn|./g) || []).concat(m[2] ? [m[2]] : []); };
+  const capsOf = label => label ? label.split('+').map(c => c || '+') : [];   // "Super+Alt+A": one key cap per part
   $('dc-field').onclick = () => {
-    if (recording) return post({ do: 'cancelRecord' });
+    if (recording) return stopRecording();
     recording = true; $('dc-field').classList.add('rec'); dcKeys('', 'Type Shortcut');
-    $('dc-hint').textContent = 'Press a key combo, a modifier on its own, or an F-key. Esc cancels.'; $('dc-hint').className = '';
-    post({ do: 'recordDictate' });
+    $('dc-hint').textContent = 'Press a key with Super, Ctrl or Alt, or an F-key. Esc cancels.'; $('dc-hint').className = '';
   };
   $('dc-clear').onclick = () => { prefs.dictateHotkeyLabel = ''; paintPrefs(); post({ do: 'clearDictate' }); };
   $('dc-globe-open').onclick = () => post({ do: 'globeKey' });
-  document.addEventListener('pointerdown', e => { if (recording && !e.target.closest('#dc-field')) post({ do: 'cancelRecord' }); });
+  const stopRecording = () => { recording = false; $('dc-field').classList.remove('rec'); paintPrefs(); };
+  document.addEventListener('pointerdown', e => { if (recording && !e.target.closest('#dc-field')) stopRecording(); });
+  // Keys that already do something on this desktop never arrive here, so they cannot be recorded by mistake.
+  const KEYNAMES = { Space: 'SPACE', Enter: 'RETURN', Comma: 'COMMA', Period: 'PERIOD', Slash: 'SLASH', Semicolon: 'SEMICOLON', Minus: 'MINUS', Equal: 'EQUAL',
+    Tab: 'TAB', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', ArrowUp: 'UP', ArrowDown: 'DOWN' };
+  const MODKEYS = { Meta: 'SUPER', Super: 'SUPER', OS: 'SUPER', Control: 'CTRL', Alt: 'ALT', Shift: 'SHIFT' };
+  const heldMods = e => { const h = new Set([e.metaKey && 'SUPER', e.ctrlKey && 'CTRL', e.altKey && 'ALT', e.shiftKey && 'SHIFT', e.type === 'keydown' && MODKEYS[e.key]].filter(Boolean));
+    if (e.type === 'keyup') h.delete(MODKEYS[e.key]); return ['SUPER', 'CTRL', 'ALT', 'SHIFT'].filter(m => h.has(m)); };
+  const capName = m => m[0] + m.slice(1).toLowerCase();
+  document.addEventListener('keyup', e => ob.keys(heldMods(e).map(capName)), true);
+  document.addEventListener('keydown', e => {
+    const mods = heldMods(e);
+    ob.keys(mods.map(capName));
+    if (!recording) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.key === 'Escape') return stopRecording();
+    const c = e.code, key = /^Key[A-Z]$/.test(c) ? c[3] : /^Digit\d$/.test(c) ? c[5] : /^F\d{1,2}$/.test(c) ? c : KEYNAMES[c] || '';
+    if (!key) return ob.rec(mods.map(capName).join('+'));
+    if (!mods.some(m => m !== 'SHIFT') && !/^F\d/.test(key)) return ob.rec('Add Super, Ctrl or Alt');
+    post({ do: 'setHotkey', kind: 'dictate', keys: [...mods, key].join(' + ') });
+  }, true);
 
-  // Permissions: icon color + SF-style glyph, why it's needed.
+  // What Atticus uses: icon color, glyph, why it's needed.
   const P = [
     ['claude', 'AI Provider', 'Checking…', '#d97757', '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/>'],
     ['mic', 'Microphone', 'Listens when you start a voice request.', '#ff9f0a', '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>'],
-    ['speech', 'Speech Recognition', 'Turns your words into text, on this Mac.', '#8e8e93', '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>'],
-    ['ax', 'Accessibility', 'Moves windows and clicks buttons for you.', '#0a84ff', '<circle cx="12" cy="4.5" r="1.6"/><path d="M5 8.5l7 1.5 7-1.5M12 10v4.5M12 14.5l-3 6M12 14.5l3 6"/>'],
-    ['screen', 'Screen Recording', 'Looks at your screen when you say “this”.', '#bf5af2', '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>'],
-    ['chrome', 'Chrome Pages', 'Reads and clicks web pages in Chrome, in the background.', '#34c759', '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5h8.2M9 13.7L4.9 6.6M15 13.7l-4.1 7.1"/>'],
-    ['auto', 'Automation', 'Pick the apps Atticus can control, all at once.', '#636366', '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>'],
+    ['speech', 'Speech Recognition', 'Turns your words into text, on this computer.', '#8e8e93', '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>'],
+    ['ax', 'Keyboard and Mouse', 'Moves windows, clicks and types for you.', '#0a84ff', '<circle cx="12" cy="4.5" r="1.6"/><path d="M5 8.5l7 1.5 7-1.5M12 10v4.5M12 14.5l-3 6M12 14.5l3 6"/>'],
+    ['screen', 'Screen Capture', 'Looks at your screen when you say “this”.', '#bf5af2', '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>'],
+    ['chrome', 'Web Pages', 'Reads and clicks web pages in a browser window of its own.', '#34c759', '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5h8.2M9 13.7L4.9 6.6M15 13.7l-4.1 7.1"/>'],
   ];
-  const rows = (list, prefix, label = 'Allow') => list.map(([id, name, why, color, svg], i) => `
+  const rows = (list, prefix, label = 'Fix') => list.map(([id, name, why, color, svg], i) => `
     <div class="row" id="${prefix}${id}" style="transition-delay:${.25 + i * .06}s">
       <div class="ic" style="background:${color}"><svg viewBox="0 0 24 24">${svg}</svg></div>
       <div class="txt"><b>${name}</b><span>${why}</span></div>
@@ -727,13 +745,12 @@
     if (last) ob.set(last);
     closeProv();
   };
-  // Agents: what Atticus turns on itself, then what only the user can (macOS privacy switches, a claude.ai sign-in). Status is live; done rows show a check.
+  // Agents: what Atticus turns on itself, then what only the user can (a program to install, a claude.ai sign-in). Status is live; done rows show a check.
   const glyph = id => P.find(p => p[0] === id);
   const OWN = [['tools', 'Your Claude Code tools', 'MCP servers, skills and plugins you already use.', '#d97757', '<path d="M14.5 5.5l4 4-9 9H5.5v-4z"/><path d="M12.5 7.5l4 4"/>'],
-    ['chrome', 'Page reading in Chrome', 'Reads and clicks pages in the background.', ...glyph('chrome').slice(3)]];
-  const YOURS = [['ax', 'Accessibility', 'Clicks and types in apps for an agent.', ...glyph('ax').slice(3)],
-    ['screen', 'Screen Recording', 'Shows an agent’s window live on its chip.', ...glyph('screen').slice(3)],
-    ['auto', 'Automation', 'Lets an agent script your apps.', ...glyph('auto').slice(3)],
+    ['chrome', 'Page reading', 'Reads and clicks pages in a browser window of its own.', ...glyph('chrome').slice(3)]];
+  const YOURS = [['ax', 'Keyboard and Mouse', 'Clicks and types in apps for an agent.', ...glyph('ax').slice(3)],
+    ['screen', 'Screen Capture', 'Lets an agent look at its window.', ...glyph('screen').slice(3)],
     ['calendar', 'Calendar', 'Reads and updates events when you ask.', '#ff453a', '<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M8.5 3v4M15.5 3v4"/>'],
     ['connectors', 'Claude connectors', 'Checking your Claude account…', '#5e5ce6', '<path d="M9 15l6-6M10.5 6.5l1-1a4 4 0 0 1 5.7 5.7l-1 1M13.5 17.5l-1 1a4 4 0 0 1-5.7-5.7l1-1"/>']];
   $('own').innerHTML = rows(OWN, 'a-', 'Turn On'); $('yours').innerHTML = rows(YOURS, 'a-');
@@ -743,28 +760,28 @@
   document.querySelector('[data-go="agents"]').addEventListener('click', () => { if (!['devin', 'pi'].includes(provider)) post({ do: 'connectors' }); });
   document.querySelectorAll('.allow').forEach(b => b.onclick = () => {   // setup's two lists share ids: the click is the same grant
     const was = b.textContent; b.classList.add('wait'); b.textContent = 'Waiting';
-    setTimeout(() => { b.classList.remove('wait'); b.textContent = was; }, 12000);   // gave up in System Settings
+    setTimeout(() => { b.classList.remove('wait'); b.textContent = was; }, 12000);   // no answer came
     post({ do: 'grant', id: b.dataset.id });
   });
 
-  let planOK = false, last = null, toggleMode = false, talkLabel = '⌃⌥Space';
+  let planOK = false, last = null, toggleMode = false, talkLabel = 'Super+Alt+A';
   const paintDone=s=>{
-    const core=[['claude','AI provider'],['mic','Microphone'],['speech','Speech Recognition'],['ax','Accessibility']],missing=core.filter(([id])=>!s[id]).map(([,name])=>name),voice=['claude','mic','speech'].every(id=>s[id]);
+    const core=[['claude','AI provider'],['mic','Microphone'],['speech','Speech Recognition'],['ax','Keyboard and Mouse']],missing=core.filter(([id])=>!s[id]).map(([,name])=>name),voice=['claude','mic','speech'].every(id=>s[id]);
     $('done-title').textContent=!missing.length?'You’re all set':voice?'Voice is ready':'Setup isn’t finished yet';$('done-status').className=missing.length?'warn':'';
-    $('done-sub').textContent=!missing.length?(toggleMode?'Press':'Hold')+' the shortcut anywhere and try one.':(voice?'Still needed for full Mac control: ':'Still needed: ')+missing.join(', ')+'. You can allow '+(missing.length===1?'it':'them')+' later in Setup & Permissions.';
+    $('done-sub').textContent=!missing.length?(toggleMode?'Press':'Hold')+' the shortcut anywhere and try one.':(voice?'Still needed to control the desktop: ':'Still needed: ')+missing.join(', ')+'. You can fix '+(missing.length===1?'it':'them')+' later in Setup & Permissions.';
     $('finish').textContent=voice?'Start Using Atticus':'Finish Setup Later';
   };
   window.ob = {
     mode(toggle) {
       toggleMode = toggle;
       if (!$('hint').classList.contains('yes')) $('hint').textContent = (toggle ? 'Press the shortcut' : 'Hold the keys') + ' and say “open Calculator”.';
-      $('welcome-talk').textContent = (toggle ? 'Press the shortcut, speak, press again to send.' : 'Hold the shortcut, speak, release to send.') + ' Your Mac does the rest.';
+      $('welcome-talk').textContent = (toggle ? 'Press the shortcut, speak, press again to send.' : 'Hold the shortcut, speak, release to send.') + ' Your computer does the rest.';
       $('try-talk').textContent = (toggle ? 'Press the shortcut anywhere. Say what you need, then press again to send.' : 'Hold the keys anywhere, say what you need, then let go.') + ' Try one now.';
     },
-    keys(held) {   // the modifiers held now ("⌃⌥", "fn"…), many times a second
+    keys(held) {   // the modifiers held now (["Super", "Alt"]), while this window has the keyboard
       const k = cur === 'try' ? [...$('trykeys').children] : [];   // only the try page reacts; the welcome keys are a demo
       if (!k.length || k[0].classList.contains('yes')) return;
-      k.forEach(c => c.classList.toggle('lit', /^(fn|[⌃⌥⇧⌘])$/.test(c.textContent) && held.includes(c.textContent)));
+      k.forEach(c => c.classList.toggle('lit', held.includes(c.textContent)));
     },
     tried() {   // the hotkey fired: keys go green, then on to the next step
       const k = cur === 'try' ? [...$('trykeys').children] : [];
@@ -779,13 +796,13 @@
       paintPrefs();
       $('p-claude').querySelector('.txt b').textContent = NAMES[provider] || NAMES.claude;
       $('p-claude').querySelector('.txt span').textContent = c.text;
-      $('p-claude').querySelector('.allow').textContent = { install: 'Install', login: 'Sign In', upgrade: 'Upgrade' }[c.need] || 'Allow';
+      $('p-claude').querySelector('.allow').textContent = { install: 'Install', login: 'Sign In', upgrade: 'Upgrade' }[c.need] || 'Set Up';
       if (last) ob.set(last);
     },
     walk(id) {   // Enable All: the step it is on says what to do there; the button waits until the walk ends
       document.querySelectorAll('#agents .row').forEach(r => {
         const line = r.querySelector('.txt span'), now = r.id === 'a-' + id;
-        if (now && !r.classList.contains('now')) { line.dataset.why = line.textContent; line.textContent = OWN.some(o => 'a-' + o[0] === r.id) ? 'Turning it on…' : 'Turn on Atticus in System Settings.'; }
+        if (now && !r.classList.contains('now')) { line.dataset.why = line.textContent; line.textContent = OWN.some(o => 'a-' + o[0] === r.id) ? 'Turning it on…' : 'Waiting for it to be set up.'; }
         if (!now && line.dataset.why) { line.textContent = line.dataset.why; delete line.dataset.why; }
         r.classList.toggle('now', now);
       });
@@ -817,9 +834,9 @@
     server(s) { saved = { apiBase: s.apiBase || '', apiModel: s.apiModel || '' }; },
     prefs(p) { document.querySelectorAll('.sw input').forEach(i => { if (document.activeElement !== i) i.checked = !!p[i.dataset.k]; }); prefs = p; paintPrefs(); },
     rec(m) { if (recording) /^Add/.test(m) || !m ? dcKeys('', m || 'Type Shortcut') : dcKeys(m); },   // held modifiers, live
-    taken(kind, own) {
-      clearTimeout(dcWarn); $('dc-hint').className = 'warn';
-      $('dc-hint').textContent = own ? 'That’s already your Atticus shortcut. Kept your old one.' : 'Another app already uses that shortcut. Kept your old one.';
+    taken({ own, what }) {
+      stopRecording(); clearTimeout(dcWarn); $('dc-hint').className = 'warn';
+      $('dc-hint').textContent = own ? 'That’s already your Atticus shortcut. Kept your old one.' : `Those keys already do “${what}”. Kept your old one.`;
       dcWarn = setTimeout(() => { dcWarn = 0; paintPrefs(); }, 4000);
     },
     recorded(label) { recording = false; $('dc-field').classList.remove('rec'); prefs.dictateHotkeyLabel = label; paintPrefs(); },
@@ -902,7 +919,7 @@
     async mac() {
       const st = $('macstage'), box = $('mac-box'), play = $('mac-play');
       st.classList.remove('snapped'); box.classList.add('gone2'); play.classList.add('gone2');
-      $('mac-q').textContent = '“Chrome left, Notes right”';
+      $('mac-q').textContent = '“Chromium left, Obsidian right”';
       await wait(600); box.classList.remove('gone2'); await wait(700); st.classList.add('snapped'); await wait(1500);
       box.classList.add('gone2'); await wait(400); $('mac-q').textContent = '“Play lo-fi on Spotify”'; box.classList.remove('gone2');
       await wait(700); play.classList.remove('gone2'); await wait(2600);

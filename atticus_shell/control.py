@@ -1,14 +1,13 @@
 """Control socket — how the global hotkey reaches the running app.
 
-Wayland/Hyprland has no app-level global-hotkey API, so the idiomatic path is a
-compositor keybind that runs a command. Atticus runs a small Unix-socket server;
-Hyprland binds send one-word commands to it:
+A global key belongs to the compositor, so a Hyprland bind runs a command.
+Atticus runs a small Unix-socket server and the binds send one-word commands
+to it (shortcuts.py writes these lines):
 
-    bind  = CTRL ALT, SPACE, exec, atticus-ctl press     # key down: start listening
-    bindr = CTRL ALT, SPACE, exec, atticus-ctl release   # key up:   send
-    bind  = , ESCAPE, exec, atticus-ctl cancel           # (optional, scoped)
+    o.bind("SUPER + ALT + A", "Atticus (voice)", "atticus-ctl toggle")
+    o.bind_hold("SUPER + ALT + A", "Atticus (voice)", "atticus-ctl press", "Atticus (send)", "atticus-ctl release")
 
-This gives true hold-to-talk through the compositor. Commands:
+The second form is hold-to-talk. Commands:
     press | release | toggle | cancel | ask <text> | ping
     dictate | dictate-press | dictate-release | dictate-text <text>   (typed at the cursor)
     settings | quit

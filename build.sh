@@ -139,11 +139,11 @@ Done. Manage it like any service:
     systemctl --user restart atticus    # after changing settings
     journalctl --user -u atticus -f     # live logs
 
-One manual step (Hyprland keeps its keybinds in Lua). Add to
-~/.config/hypr/bindings.lua, then run: hyprctl reload && hyprctl configerrors
+Shortcuts (lines in ~/.config/hypr/bindings.lua; change them in Settings):
+EOF
+(cd "$SRC" && PATH="$BIN:$PATH" "$VENV/bin/python" -m atticus_shell.shortcuts | sed 's/^/    /')
+cat <<EOF
 
-    o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "$BIN/atticus-ctl toggle")
-
-Then press Ctrl+Alt+Space (or say the wake word, if enabled), talk, and press
-again to send. Settings live in ~/.config/atticus/settings.json.
+Press the talk keys (or say the wake word, if enabled), talk, and press again
+to send. Settings: atticus-ctl settings, or ~/.config/atticus/settings.json.
 EOF

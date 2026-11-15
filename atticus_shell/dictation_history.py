@@ -3,7 +3,7 @@ and the stats the Dictation page shows (words today/all time, sessions, time
 saved). Off by the `dictateHistory` setting (on by default); turning it off
 keeps what is already saved.
 
-Last 500 entries, 30 days — the same limit Atticus.swift used.
+Last 500 entries, 30 days.
 """
 from __future__ import annotations
 

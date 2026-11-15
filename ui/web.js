@@ -1,4 +1,4 @@
-// Runs inside the user's browser tab (atticus.py --web, through AppleScript): read the page, click or fill by number.
+// Runs inside the user's browser tab (atticus.py --web): read the page, click or fill by number.
 // One expression, called as (src)(cmd, n, text). Numbers refer to the controls saved by the last read.
 (function (cmd, n, text) {
   const clean = s => (s || '').trim().replace(/\s+/g, ' ');

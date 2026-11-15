@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
-"""File search for the brain, which calls it as `mdfind` (fd + ripgrep underneath).
+"""File search for the brain (fd and ripgrep underneath).
 
-The brain (atticus.py) searches files with:
-    mdfind -name "<words>"              filename search (default root: $HOME)
-    mdfind -onlyin <dir> "<words>"      content search, scoped to <dir>
-    mdfind "<words>"                    content search (default root: $HOME)
+    findfile -name "<words>"              filename search (default root: $HOME)
+    findfile -onlyin <dir> "<words>"      content search, scoped to <dir>
+    findfile "<words>"                    content search (default root: $HOME)
 
-Linux has no Spotlight index. Filename search maps to `fd`, one call per word
-with the results intersected, so word order and separator (underscore, dash,
-space, camelCase) don't matter, same as Spotlight's own tokenized matching;
-content search maps to `rg` (ripgrep). Both fall back to plain `find`/`grep`
-if not installed. `fd` and `rg` already skip .gitignore'd noise (.venv,
-node_modules, ...) by default, which keeps results close to what mdfind's own
-exclusion list would have skipped anyway. One matching path per line, like
-mdfind's own output.
+Filename search is `fd`, one call per word with the results intersected, so
+word order and separator (underscore, dash, space, camelCase) don't matter;
+content search is `rg` (ripgrep). Both fall back to plain `find`/`grep` if
+not installed. `fd` and `rg` already skip .gitignore'd noise (.venv,
+node_modules, ...). One matching path per line.
 """
 import os
 import shutil
@@ -69,7 +65,7 @@ def main(argv: list) -> int:
         if a == "-name":
             name_mode = True; i += 1; continue
         if a.startswith("-"):
-            i += 1; continue   # an mdfind flag we don't model: ignore, don't fail
+            i += 1; continue   # a flag this search does not have: ignore, don't fail
         rest.append(a); i += 1
     query = " ".join(rest).strip().strip('"\'')
     if not query:

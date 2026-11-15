@@ -17,7 +17,9 @@ same name, and is the number that counts: a synthetic voice is one speaker
 with perfect diction, so use it to compare two versions, not as the truth.
 
 Engines: local (the model on this machine), local+vocab (the same, told the
-names it is likely to hear), remote (the Home Assistant server, when set up).
+names it is likely to hear), local+rumble (local+vocab with the low rumble cut
+first, as the assistant does when the server is away), remote (the Home
+Assistant server, when set up).
 """
 import argparse
 import re
@@ -178,6 +180,8 @@ def main():
         sets = {c: [(s, degrade(x, noise, c, rng)) for s, x in clean] for c in CONDITIONS}
 
     def run(engine, audio):
+        if engine == "local+rumble":   # what the assistant does when the server is away: rumble cut, then levelled
+            return tr.transcribe_local(speech.level_audio(speech.cut_rumble(audio)), args.language, vocab)
         audio = speech.level_audio(audio)
         if engine == "remote":
             return tr.remote.transcribe(audio, args.language)

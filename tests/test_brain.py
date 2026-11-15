@@ -32,8 +32,18 @@ class Prompt(unittest.TestCase):
 
     def test_describes_this_desktop(self):
         self.assertIn("Linux desktop", self.prompt)
-        for gone in ("Mac", "AppleScript", "osascript", "accessib", "AX,", "--meeting-history", "open -a Atticus", "--calendar --help", "--contacts"):
+        for gone in ("Mac", "AppleScript", "osascript", "accessib", "AX,", "--meeting-history", "open -a Atticus", "app address book"):
             self.assertNotIn(gone, self.prompt)
+
+    def test_offers_what_was_ported(self):
+        # calendar, contacts, drawing on the screen and the hand-off to background agents all work on this desktop
+        for tool in ("--calendar --help", "--contacts", "--draw --help", "[agent {"):
+            self.assertIn(tool, self.prompt, tool)
+        os.environ["ATTICUS_MAIN_ONLY"] = "1"   # agents switched off: the model is not told to hand anything off
+        try:
+            self.assertNotIn("[agent {", self.brain.system_prompt(self.brain.ASK_FIRST))
+        finally:
+            del os.environ["ATTICUS_MAIN_ONLY"]
 
     def test_offers_the_assistant_tools(self):
         for tool in ("--timer", "--alarm", "--remind", "--alarms", "--volume", "--media", "--brightness", "--list", "--home", "outside "):

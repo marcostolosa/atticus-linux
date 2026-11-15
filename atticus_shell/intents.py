@@ -263,6 +263,18 @@ _HUSH = (r"(?:pode |ja |ok |okay |ta bom |ta |agora )?(?:para|pare|parar|chega|s
 _HUSH_UNLESS_DEVICE = r"(?:pode )?(?:desliga|desligue|desligar|fecha|feche|fechar|sai|saia|sair|turn off|close|go away)(?: ai| isso| agora)?"
 
 
+_GUIDE = {"next": r"(?:proxim[oa]|proximo passo|seguinte|avanca|avancar|continua|continuar|pronto|feito|ja fiz|cliquei|next|next step|continue|done|go on)",
+          "back": r"(?:volta|voltar|anterior|passo anterior|back|go back|previous)",
+          "close": r"(?:fecha|fechar|chega|para|pare|sai|sair|tira isso|pode tirar|close|stop|dismiss|that's all)"}
+
+
+def guide_word(text: str) -> str | None:
+    """While a guide is drawn on the screen: "next", "back" or "close" when
+    that is all that was said, else None (a new request)."""
+    said = re.sub(rf"^{_PLEASE}|[.!?,]+$", "", clean(fold(text))).strip()
+    return next((verb for verb, pattern in _GUIDE.items() if re.fullmatch(pattern + r"(?: por favor| please)?", said)), None)
+
+
 def parse(text: str, now: float | None = None, home: bool | None = None, device: bool = False) -> Intent | None:
     """`home`: whether a smart-home server is configured (None = look it up).
     Without one, "liga a luz" is not an instant command and goes to the model.

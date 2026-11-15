@@ -97,7 +97,7 @@ _ALLOW = {
     "wpctl": _any, "playerctl": _any, "brightnessctl": _any, "notify-send": _any, "wl-paste": _any, "wl-copy": _any,
     "nmcli": _nmcli, "bluetoothctl": _bluetoothctl, "hyprctl": _hyprctl, "systemctl": _systemctl,
     # app/file launchers and file search (the gate still asks before one runs a script or program)
-    "open": _any, "mdfind": _any, "xdg-open": _any, "gtk-launch": _any,
+    "open": _any, "findfile": _any, "xdg-open": _any, "gtk-launch": _any,
     # harmless on their own
     "date": _any, "echo": _any, "printf": _any, "true": _any, "sleep": _any, "pwd": _any, "whoami": _any,
     "hostname": _any, "uname": _any, "uptime": _any, "cal": _any,

@@ -49,6 +49,7 @@ class SettingsWindow:
             pass
         self.web.connect("load-changed", self._on_load)
         self.window.set_child(self.web)
+        backend.push = lambda name, payload: GLib.idle_add(self.call, name, payload)
         self.web.load_html(load_page("settings.html"), None)
 
     # --- lifecycle -------------------------------------------------------
@@ -137,3 +138,4 @@ class SettingsWindow:
         GLib.idle_add(self.call, "load", state)
         GLib.idle_add(self.call, "mics", backend.mic_list())
         GLib.idle_add(self.call, "perms", backend.perms_payload())
+        GLib.idle_add(self.call, "whisper", backend.speech_models.status())

@@ -8,6 +8,7 @@ v1 implements the commands the core loop needs:
   --screens                      JSON [[name,x,y,w,h,builtin], ...] (main first)
   --look <n> <out.jpg> [winid]   screenshot display n (1-based), ~1280px wide JPEG
   --text <app> [title]           OCR of that window's region (grim + tesseract)
+  --calendar                     calendar request as JSON on stdin (agenda.py)
 Everything else exits non-zero; the brain already degrades gracefully.
 """
 from __future__ import annotations
@@ -504,6 +505,21 @@ def main(argv: list[str]) -> int:
         if not ok:
             print(msg or "Could not type.")
         return 0 if ok else 1
+    if cmd == "--draw-target":   # the window a guide is about: the one in use
+        w = _active_window()
+        if not w:
+            return 1
+        (x, y), (width, height) = w.get("at", [0, 0]), w.get("size", [0, 0])
+        print(json.dumps({"pid": w.get("pid", 0), "windowID": str(w.get("address", "")), "windowFrame": [x, y, width, height]}))
+        return 0
+    if cmd == "--calendar":   # one JSON request on stdin, one JSON answer
+        from . import agenda
+        try:
+            print(json.dumps(agenda.run(json.load(sys.stdin)), ensure_ascii=False))
+            return 0
+        except (OSError, ValueError, TypeError, KeyError) as e:
+            print(json.dumps({"error": str(e)[:300] or "Calendar could not finish."}))
+            return 0
     if cmd == "control" and len(argv) >= 2:
         from . import control
         rest = " ".join(argv[1:])

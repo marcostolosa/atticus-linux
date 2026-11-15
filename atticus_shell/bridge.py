@@ -26,6 +26,8 @@ from typing import Callable, Optional
 
 from gi.repository import GLib
 
+from .settings import get as _setting
+
 RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
 ATTICUS_PY = RES / "atticus.py"
 # Single-file launcher the brain runs as $ATTICUS_APP (argv[0]); it execs the CLI.
@@ -43,11 +45,13 @@ def _brain_env() -> dict:
     # choice ("◇"), permission ("?") and setting ("⚙") cards to us instead of
     # a dialog path that does not exist on this desktop (so a pick
     # would silently resolve to "none" and the brain would wrongly report that
-    # the user did not choose). Background-agent hand-off is not wired in this
-    # shell, so force main-window delivery to keep the model from moving a task
-    # to an agent that never runs.
+    # the user did not choose).
     env["ATTICUS_UI"] = "1"
-    env["ATTICUS_MAIN_ONLY"] = "1"
+    # Long requests move to a background agent (agents.py). Setting
+    # "agents" to false keeps every request in the box.
+    env.pop("ATTICUS_MAIN_ONLY", None)
+    if not _setting("agents", True):
+        env["ATTICUS_MAIN_ONLY"] = "1"
     # The launcher runs `python -m atticus_shell.cli`, so the package must resolve.
     pp = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = str(RES) + (os.pathsep + pp if pp else "")
@@ -61,8 +65,20 @@ class Bridge:
 
     def __init__(self, overlay, speak: Optional[Callable[[str], None]] = None,
                  on_done: Optional[Callable[[], None]] = None,
-                 on_prompt: Optional[Callable[[str, dict], None]] = None):
+                 on_prompt: Optional[Callable[[str, dict], None]] = None,
+                 on_draw: Optional[Callable[[dict], None]] = None,
+                 on_point: Optional[Callable[[float, float], None]] = None,
+                 on_handoff: Optional[Callable[[dict], None]] = None,
+                 on_agent: Optional[Callable[[str, bool], None]] = None):
         self.overlay = overlay
+        # A request that moves to a background agent, and a task to show.
+        self.on_handoff = on_handoff or (lambda brief: None)
+        self.on_agent = on_agent or (lambda identifier, view: None)
+        self.move_file = ""        # writing "go" here moves the running request to the background
+        self.show_agent = ""       # a task whose card the box shows once this request ends
+        # A guide to draw over the desktop, and a spot to point at on it.
+        self.on_draw = on_draw or (lambda guide: None)
+        self.on_point = on_point or (lambda x, y: None)
         self.speak = speak or (lambda text: None)
         self.on_done = on_done or (lambda: None)
         # Called on the GLib main thread when an interactive card appears:
@@ -118,7 +134,15 @@ class Bridge:
         if info and info.get("a"):
             self._write_answer(info["a"], value)
 
+    def move(self) -> bool:
+        """Send the running request to the background. False when it cannot move now."""
+        if not self.move_file or not self.running():
+            return False
+        self._write_answer(self.move_file, "go")
+        return True
+
     def _clear_pending(self):
+        self.move_file = ""
         self.pending_pick = None
         self.pending_perm = None
         self.pick_options = []
@@ -210,9 +234,42 @@ class Bridge:
                 except Exception:
                     import traceback
                     traceback.print_exc()
-            elif tag in ("▣", "@", "▤", "▥", "⤴", "⇢"):
-                # mini-screen / agents / movable: not in v1 core — ignore.
-                pass
+            elif tag == "@":
+                # "@ <x> <y> [answer]": a spot on the desktop, in its own pixels
+                parts = rest.split()
+                try:
+                    self.on_point(float(parts[0]), float(parts[1]))
+                except (IndexError, ValueError):
+                    pass
+            elif tag == "✎" and rest.lstrip().startswith("{"):
+                # an object is a guide to draw; a list is the box's own
+                # "what was remembered" row and goes to the page below
+                try:
+                    guide = json.loads(rest)
+                except ValueError:
+                    return False
+                if isinstance(guide, dict):
+                    self.on_draw(guide)
+            elif tag == "⤴":   # the request goes on in the background: the box is free again
+                try:
+                    brief = json.loads(rest)
+                except ValueError:
+                    return False
+                if isinstance(brief, dict):
+                    self.move_file = ""
+                    self.overlay.call("finished")
+                    self.on_handoff(brief)
+            elif tag == "⇢":   # {"a": file}: this request can be moved now; {}: no longer
+                try:
+                    self.move_file = str(json.loads(rest).get("a") or "")
+                except (ValueError, AttributeError):
+                    self.move_file = ""
+            elif tag == "▤":   # show that task's card after this request
+                self.show_agent = rest.strip()
+            elif tag == "▥":   # open that task in the agents window now
+                self.on_agent(rest.strip(), True)
+            elif tag == "▣":
+                pass   # a live picture of the window being worked in: not shown on this desktop
             elif tag == "✓":
                 self.overlay.call("line", line)
                 answer_spoken.append(rest)
@@ -242,6 +299,9 @@ class Bridge:
             return False
         self.proc = None
         self._clear_pending()
+        shown, self.show_agent = self.show_agent, ""
+        if shown:
+            self.on_agent(shown, False)
         if proc.returncode and not answer_spoken:
             self.overlay.call("msg", "")
         try:

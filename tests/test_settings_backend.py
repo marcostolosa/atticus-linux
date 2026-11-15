@@ -15,6 +15,14 @@ class SettingsBackend(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="atticus-test-")
         self.old = os.environ.get("ATTICUS_DIR")
         os.environ["ATTICUS_DIR"] = self.dir
+        # the shortcuts live in Hyprland's file: these tests get one of their own and never reload the real desktop
+        self.binds = os.path.join(self.dir, "bindings.lua")
+        with open(self.binds, "w") as f:
+            f.write('o.bind("SUPER + ALT + A", "Atticus (voice)", "/bin/atticus-ctl toggle")\n')
+        for p in (patch.dict(os.environ, {"ATTICUS_HYPR_BINDS": self.binds}),
+                  patch.object(backend.shortcuts, "_hyprctl", lambda *a: "[]" if a[0] == "-j" else "")):
+            p.start()
+            self.addCleanup(p.stop)
 
     def tearDown(self):
         if self.old is None:
@@ -70,11 +78,25 @@ class SettingsBackend(unittest.TestCase):
         self.assertEqual(name, "notice")
         self.assertIn("no per-app permission", payload["text"])
 
-    def test_deferred_subsystems_say_so_rather_than_silently_doing_nothing(self):
-        for do in ("whisperInstall", "record", "automation", "resetHotkey"):
-            name, payload = backend.dispatch({"do": do})
-            self.assertEqual(name, "notice")
-            self.assertTrue(payload["text"])
+    def test_new_keys_are_bound_and_the_page_gets_the_state_back(self):
+        name, payload = backend.dispatch({"do": "setHotkey", "kind": "dictate", "keys": "SUPER + ALT + D"})
+        self.assertEqual((name, payload["prefs"]["dictateHotkeyLabel"], payload["prefs"]["hotkeyLabel"]), ("load", "Super+Alt+D", "Super+Alt+A"))
+        name, payload = backend.dispatch({"do": "setHotkey", "kind": "dictate", "keys": "SUPER + ALT + A"})
+        self.assertEqual((name, payload), ("taken", {"kind": "dictate", "own": True, "what": "talk"}))
+        name, payload = backend.dispatch({"do": "clearDictate"})
+        self.assertEqual(payload["prefs"]["dictateHotkeyLabel"], "")
+        with patch.object(backend.shortcuts, "can_hold", lambda: True):
+            name, payload = backend.dispatch({"do": "set", "k": "talkMode", "v": "hold"})
+        self.assertEqual(payload["prefs"]["talkMode"], "hold")
+        self.assertIn("o.bind_hold(", open(self.binds).read())
+        self.assertIsNone(backend.dispatch({"do": "record"}))   # the page reads the keys itself
+
+    def test_speech_models_are_listed_for_the_page(self):
+        with patch.object(backend.speech_models, "have", lambda model: model == "small"):
+            name, payload = backend.dispatch({"do": "whisper"})
+        self.assertEqual(name, "whisper")
+        self.assertEqual([(m["id"], m["have"]) for m in payload["models"]][:3], [("tiny", False), ("base", False), ("small", True)])
+        self.assertEqual(payload["models"][2]["size"], "486 MB")
 
     def test_background_agents_are_honestly_reported_as_zero(self):
         self.assertEqual(backend.dispatch({"do": "agents"}), ("agents", {"count": 0}))
@@ -127,12 +149,7 @@ class SettingsBackend(unittest.TestCase):
         self.assertEqual(prefs["hotkeyLabel"], "SUPER+SPACE")
         self.assertEqual(prefs["dictateHotkeyLabel"], "")
 
-    def test_hyprland_binds_finds_the_talk_and_dictate_keys(self):
-        rows = [{"mods": "SUPER", "key": "SPACE", "arg": "atticus-ctl press"},
-                {"mods": "SUPER", "key": "D", "arg": "atticus-ctl dictate"},
-                {"mods": "SUPER", "key": "Q", "arg": "killactive"}]
-        with patch("subprocess.run") as run:
-            run.return_value.returncode = 0
-            run.return_value.stdout = __import__("json").dumps(rows)
-            found = backend.hyprland_binds()
-        self.assertEqual(found, {"talk": "SUPER+SPACE", "dictate": "SUPER+D"})
+    def test_hyprland_binds_reads_the_bound_lines(self):
+        with open(self.binds, "a") as f:
+            f.write('o.bind("SUPER + ALT + D", "Atticus dictation", "/bin/atticus-ctl dictate")\no.bind("SUPER + Q", "Close", "killactive")\n')
+        self.assertEqual(backend.hyprland_binds(), {"talk": "Super+Alt+A", "dictate": "Super+Alt+D"})

@@ -90,6 +90,8 @@ def find_window(app: str = "", title: str = "") -> dict:
         return front()
     want, words = app.casefold(), [w for w in title.casefold().split() if w]
     rows = [w for w in windows() if want in str(w.get("class", "")).casefold() or want in str(w.get("initialClass", "")).casefold()]
+    if not rows:   # said by what the window shows ("the form"), not by its program's class name
+        rows = [w for w in windows() if want in str(w.get("title", "")).casefold()]
     rows = [w for w in rows if all(x in str(w.get("title", "")).casefold() for x in words)] or ([] if words else rows)
     return rows[0] if rows else {}
 

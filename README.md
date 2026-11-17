@@ -140,6 +140,27 @@ your user does not have to be in the `input` group.
   it on when it starts. A program that was already open may need a restart, and
   Electron or Chromium apps may need `--force-renderer-accessibility`.
 
+### The model's shell runs as another user
+
+The commands the model writes itself (anything not on the helper list) run
+inside bubblewrap, and, once you run the one-time setup, **as a separate
+system user, `atticus`**:
+
+```bash
+sudo sh tools/setup-atticus-user.sh
+```
+
+That user has no password, no login shell and no sudo, and it cannot enter
+your home directory (inside the box your home is an empty folder). It writes
+only to a scratch folder made for the request under `/var/lib/atticus/scratch`.
+The only thing the script lets you start as it is `bwrap`. Everything such a
+command did shows up in the journal and process list under that user id.
+Helpers (volume, music, calendar, clicking by name) and commands you approve
+on an Allow card still run as you, because they have to act on your session.
+Without the setup the box still works as before, as your own user; the
+setting `isolatedUser` (default `true`) switches the separate user off.
+Undo: `sudo userdel atticus && sudo rm -r /var/lib/atticus /etc/sudoers.d/atticus`.
+
 Raw mouse and keyboard input by screen position (`ydotool`, which needs the
 `input` group) is off. Turn it on with `"rawInput": true` in `settings.json`
 only if you accept that: anything that reaches that daemon can type into any
@@ -173,6 +194,7 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `sounds` | `true` | Play the start and stop chimes. |
 | `wake` | `false` | Enable the always-on wake word. |
 | `wakeWord` | `"siri"` | The word that starts listening. |
+| `isolatedUser` | `true` | Run the model's own shell commands as the `atticus` system user when `tools/setup-atticus-user.sh` has been run. |
 | `rawInput` | `false` | Allow clicks, drags and scrolls by screen position through `ydotool` (needs it installed and your user in the `input` group). Off by default: controls are used by name. |
 | `asrModel` | `"small"` | Whisper model. `"base"` answers about 2 s sooner on a laptop CPU but mishears more. |
 | `sttRemote` | `"auto"` | Use the Home Assistant server's Whisper service for speech recognition when `haUrl`/`haToken` are set (usually a larger model on a stronger machine: faster and far better with whispers). Falls back to the local model. `"off"` keeps it local. |

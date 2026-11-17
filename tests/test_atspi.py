@@ -84,5 +84,16 @@ class AtspiTest(unittest.TestCase):
             self.assertIn('address:0xabc', run.call_args[0][0][2])
 
 
+class FindWindowTest(unittest.TestCase):
+    def test_a_window_is_found_by_class_then_by_title(self):
+        rows = [{"class": "chrome-__tmp_x-Default", "initialClass": "", "title": "AtticusForm", "pid": 1},
+                {"class": "kitty", "initialClass": "kitty", "title": "htop", "pid": 2}]
+        with mock.patch.object(atspi, "windows", lambda: rows):
+            self.assertEqual(atspi.find_window("kitty")["pid"], 2)
+            self.assertEqual(atspi.find_window("atticusform")["pid"], 1)
+            self.assertEqual(atspi.find_window("chrome", "atticusform")["pid"], 1)
+            self.assertEqual(atspi.find_window("nothing"), {})
+
+
 if __name__ == "__main__":
     unittest.main()

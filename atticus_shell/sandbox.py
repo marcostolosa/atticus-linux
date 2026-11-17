@@ -12,7 +12,10 @@ way round. A command the model wants to run is one of:
            secrets (SSH/GPG keys, browser profiles, tokens, Atticus's own
            data) hidden, no network, no session bus, no display — so it can
            compute and read ordinary files but cannot change, send or control
-           anything.
+           anything. When the `atticus` system user exists (tools/setup-atticus-user.sh)
+           it also runs as that user, with the home directory hidden: a flaw
+           in the box then still meets ordinary file permissions, and
+           everything it did is under another user id in the logs.
   outside  the model says a command must really act on the computer by
            prefixing it with `outside`. The user sees the exact command on an
            Allow card first.
@@ -28,6 +31,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 
 OUTSIDE = "outside"
 
@@ -286,22 +290,53 @@ def available() -> bool:
     return bool(shutil.which("bwrap"))
 
 
-def wrap(cmd: str, scratch: str, home: str | None = None, extra_hidden: tuple[str, ...] = ()) -> str:
+USER = "atticus"
+SCRATCH_ROOT = "/var/lib/atticus/scratch"
+BWRAP = "/usr/bin/bwrap"
+
+
+def isolated() -> bool:
+    """True when commands can run as the `atticus` user: the user exists and
+    sudo lets this user run bubblewrap as it, without a password."""
+    if not os.path.isdir(SCRATCH_ROOT) or not os.access(SCRATCH_ROOT, os.W_OK):
+        return False
+    try:
+        return subprocess.run(["sudo", "-n", "-u", USER, BWRAP, "--version"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def make_scratch(name: str, root: str = SCRATCH_ROOT) -> str:
+    """A working directory the `atticus` user can write and only the two of
+    us can enter. Its name is the ask's, cut down to plain characters."""
+    path = os.path.join(root, re.sub(r"[^A-Za-z0-9_.-]", "_", name)[:80] or "ask")
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    subprocess.run(["setfacl", "-m", f"u:{USER}:rwx", "-d", "-m", f"u:{USER}:rwx", path], capture_output=True, timeout=5)
+    return path
+
+
+def wrap(cmd: str, scratch: str, home: str | None = None, extra_hidden: tuple[str, ...] = (), as_user: bool = False) -> str:
     """The same command, run inside bubblewrap. `scratch` is the one writable
-    directory (and the working directory)."""
+    directory (and the working directory). With `as_user` it runs as the
+    `atticus` user and the whole home directory is an empty folder."""
     home = home or os.path.expanduser("~")
-    os.makedirs(scratch, mode=0o700, exist_ok=True)
-    args = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/var/tmp",
+    if not as_user:
+        os.makedirs(scratch, mode=0o700, exist_ok=True)
+    args = (["sudo", "-n", "-u", USER, BWRAP] if as_user else ["bwrap"]) + [ "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/var/tmp",
             "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session"]
+    if as_user:
+        args += ["--tmpfs", home]
     for d in _SECRET_DIRS:
         p = os.path.join(home, d)
-        if os.path.isdir(p):
+        if os.path.isdir(p) and not as_user:
             args += ["--tmpfs", p]
     for f in _SECRET_FILES:
         p = os.path.join(home, f)
-        if os.path.isfile(p):
+        if os.path.isfile(p) and not as_user:
             args += ["--ro-bind", "/dev/null", p]
     for p in extra_hidden:
+        if as_user:   # inside the empty home already
+            continue
         if os.path.isdir(p):
             args += ["--tmpfs", p]
         elif os.path.isfile(p):

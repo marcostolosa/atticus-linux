@@ -120,5 +120,44 @@ class Jail(unittest.TestCase):
         self.assertLess(int(r.stdout.strip().splitlines()[-1]), 6)   # its own PID namespace: it sees only itself
 
 
+class AsOtherUser(unittest.TestCase):
+    """Commands can run as the `atticus` system user (no real sudo is called here)."""
+    def test_command_is_wrapped_for_that_user_with_an_empty_home(self):
+        import shlex
+        argv = shlex.split(S.wrap("echo hi", "/var/lib/atticus/scratch/a1", home="/home/me", extra_hidden=("/home/me/.config/atticus",), as_user=True))
+        self.assertEqual(argv[:6], ["sudo", "-n", "-u", "atticus", "/usr/bin/bwrap", "--ro-bind"])
+        self.assertIn("--tmpfs", argv)
+        self.assertEqual(argv[argv.index("--tmpfs", argv.index("--proc")) + 1 : argv.index("--tmpfs", argv.index("--proc")) + 2], ["/run"])
+        self.assertIn("/home/me", argv)                      # the whole home is an empty folder
+        self.assertNotIn("/home/me/.config/atticus", argv)   # so it needs no separate hiding
+        self.assertEqual(argv[-3:], ["/bin/sh", "-c", "echo hi"])
+        self.assertIn("--unshare-net", argv)
+
+    def test_nothing_is_created_in_the_home_for_it(self):
+        with tempfile.TemporaryDirectory() as home:
+            S.wrap("true", os.path.join(home, "scratch"), home=home, as_user=True)
+            self.assertFalse(os.path.exists(os.path.join(home, "scratch")))
+
+    def test_scratch_names_are_plain(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as root, mock.patch("subprocess.run") as run:
+            path = S.make_scratch("../../etc/x y", root)
+            self.assertEqual(os.path.dirname(path), root)
+            self.assertEqual(os.path.basename(path), ".._.._etc_x_y")
+            self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o700")
+            self.assertIn("u:atticus:rwx", run.call_args[0][0])
+
+    def test_not_available_without_the_setup(self):
+        from unittest import mock
+        with mock.patch.object(S, "SCRATCH_ROOT", "/nonexistent/atticus"):
+            self.assertFalse(S.isolated())
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(S, "SCRATCH_ROOT", root), \
+                mock.patch("subprocess.run") as run:
+            run.return_value.returncode = 1   # sudo refuses: no sudoers line
+            self.assertFalse(S.isolated())
+            run.return_value.returncode = 0
+            self.assertTrue(S.isolated())
+
+
 if __name__ == "__main__":
     unittest.main()

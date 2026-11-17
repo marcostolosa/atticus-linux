@@ -1,4 +1,6 @@
 #!/bin/sh
 # Single-file native-helper launcher. The brain (atticus.py) runs $ATTICUS_APP as
-# one executable; this execs the real Python CLI.
-exec "${ATTICUS_PYTHON:-python3}" -m atticus_shell.cli "$@"
+# one executable; this execs the real Python CLI. It finds its package next to
+# itself, so it works from any directory and without PYTHONPATH.
+here="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "${ATTICUS_PYTHON:-python3}" -m atticus_shell.cli "$@"

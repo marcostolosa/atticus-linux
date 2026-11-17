@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -55,6 +56,14 @@ def _ui_language() -> str:
     return loc if loc in ("en", "pt", "it", "es", "fr", "de") else "en"
 
 
+def _blur_on() -> bool:
+    try:
+        out = subprocess.run(["hyprctl", "getoption", "decoration:blur:enabled"], capture_output=True, text=True, timeout=2).stdout
+        return "true" in out.split("\n")[0].lower()
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def load_page(name: str) -> str:
     """A page as one document: orbs.js and i18n.js go in at their markers, the shared look (theme.css) after the page's own styles."""
     html = (UI / name).read_text(encoding="utf-8")
@@ -63,7 +72,10 @@ def load_page(name: str) -> str:
     lang = _ui_language()
     auto = _ui_language()  # resolve("auto") == resolved default
     header = f"window.atticusLanguage = {json.dumps(lang)}; window.atticusAutoLanguage = {json.dumps(auto)};\n"
-    theme = "<style id=\"atticus-theme\">" + _read(UI / "theme.css") + "</style>"
+    theme = _read(UI / "theme.css")
+    if not _blur_on():   # nothing frosts what is behind the glass, so it is nearly solid instead of see-through
+        theme += ":root { --a-surface: linear-gradient(180deg, rgba(34,34,40,.96), rgba(18,18,22,.96)); }"
+    theme = "<style id=\"atticus-theme\">" + theme + "</style>"
     page = html.replace("/*ORBS*/", orbs).replace("/*I18N*/", header + i18n)
     return page.replace("</head>", theme + "</head>", 1) if "</head>" in page else theme + page
 

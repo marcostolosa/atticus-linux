@@ -258,8 +258,7 @@
   #dc-words { white-space: pre-line; }
   #dc-caret { display: inline-block; width: 1.5px; height: 16px; margin-left: 1px; vertical-align: -3px; background: var(--accent); animation: blink 1s steps(1) infinite; }
   #dc-key { position: absolute; right: 22px; bottom: 12px; min-width: 32px; height: 32px; padding: 0 9px; border-radius: 8px; font-size: 12px; }
-  #dc-globe button { all: unset; color: var(--accent); cursor: pointer; } #dc-globe button:focus-visible { outline: 2px solid rgba(10,132,255,.5); outline-offset: 2px; }
-  #dc-pill { left: 22px; bottom: 12px; width: 56px; height: 32px; border-radius: 16px; display: grid; place-items: center;
+    #dc-pill { left: 22px; bottom: 12px; width: 56px; height: 32px; border-radius: 16px; display: grid; place-items: center;
     transition: opacity .45s var(--ease), transform .55s var(--out), width .22s var(--ease); }
   #dc-pill.work, #dc-pill.done { width: 32px; }
   #dc-pill > * { grid-area: 1 / 1; } #dc-pill.work .wv, #dc-pill.done .wv, #dc-pill:not(.work) .orb, #dc-pill:not(.done) svg { display: none; }
@@ -436,7 +435,6 @@
   <div class="mt-row r"><div class="ic" style="background:#ff9f0a"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></div>
     <div class="txt"><b id="dc-label">Dictation shortcut</b><span id="dc-hint"></span></div>
     <div class="keyfield"><button class="kf" id="dc-field" aria-labelledby="dc-label" aria-describedby="dc-hint"></button><button class="x" id="dc-clear" aria-label="Clear dictation shortcut" hidden>×</button></div></div>
-  <div class="subrow r" id="dc-globe" hidden><span>Set Press 🌐 key to Do Nothing</span><button id="dc-globe-open">Open Keyboard Settings</button></div>
   <div class="subrow r" id="dc-mode"><span id="dc-mode-hint">Clean up tidies it as shown. Verbatim types every word.</span><div class="seg" data-k="dictateMode" role="group" aria-label="Dictated text"><button data-v="verbatim">Verbatim</button><button data-v="cleanup">Clean up</button></div></div>
   <div class="bar2 r"><button class="btn quiet" data-go="point">Skip</button><button class="btn" data-go="point">Next</button></div>
 </section>
@@ -618,7 +616,7 @@
     }
     const key = prefs.dictateHotkeyLabel;
     $('dc-sub').textContent = key ? `Press ${key} to start. Press again to finish.` : 'Give dictation a shortcut. Press it to start and again to finish.';
-    $('dc-key').textContent = key ? key.split('+').pop() : 'D'; $('dc-globe').hidden = !prefs.globeTaken;
+    $('dc-key').textContent = key ? key.split('+').pop() : 'D'; 
     $('idea-dict').hidden = !key; $('idea-key').replaceChildren(...capsOf(key || '').map(c => Object.assign(document.createElement('kbd'), { textContent: c })));
     $('dc-mode').classList.toggle('dim', !prefs.dictateHotkeyLabel);
     document.querySelector('[data-k=dictateMode] [data-v=cleanup]').disabled = other;
@@ -643,7 +641,6 @@
     $('dc-hint').textContent = 'Press a key with Super, Ctrl or Alt, or an F-key. Esc cancels.'; $('dc-hint').className = '';
   };
   $('dc-clear').onclick = () => { prefs.dictateHotkeyLabel = ''; paintPrefs(); post({ do: 'clearDictate' }); };
-  $('dc-globe-open').onclick = () => post({ do: 'globeKey' });
   const stopRecording = () => { recording = false; $('dc-field').classList.remove('rec'); paintPrefs(); };
   document.addEventListener('pointerdown', e => { if (recording && !e.target.closest('#dc-field')) stopRecording(); });
   // Keys that already do something on this desktop never arrive here, so they cannot be recorded by mistake.

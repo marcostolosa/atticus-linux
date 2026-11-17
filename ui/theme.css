@@ -3,7 +3,7 @@
    page's own styles, so these values win. Change a number here, not in a page. */
 :root {
   --a-font: system-ui, Inter, Cantarell, sans-serif;
-  --a-surface: linear-gradient(180deg, rgba(34,34,40,.96), rgba(18,18,22,.96));   /* a floating panel */
+  --a-surface: linear-gradient(180deg, rgba(34,34,40,.62), rgba(18,18,22,.62));   /* a floating panel */
   --a-surface-solid: #1e1e20;                                                      /* a normal window */
   --a-stroke: inset 0 0 0 1px rgba(255,255,255,.10), inset 0 1px 0 rgba(255,255,255,.08);
   --a-radius: 22px;       /* panels */

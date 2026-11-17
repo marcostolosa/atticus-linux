@@ -541,6 +541,7 @@
   };
   $('fold').onclick = () => { if (folded) foldBeforeQuestion = false; foldBox(!folded); };
   const fit = (follow = true) => {
+    window.i18n?.within(document.querySelectorAll('.ok, .pk, .rewrite, .elapsed, .tip, .step, #pointbar'));   // the box's own words, never the thread's text
     const card = $('card'); webkit.messageHandlers.h.postMessage(document.body.classList.contains('dictate') ? [card.offsetWidth, card.offsetHeight] : card.offsetHeight);   // the dictation pill sizes its width too
     if (!folded && follow && atBottom) $('thread').scrollTop = $('thread').scrollHeight;
     miniRect();
@@ -629,7 +630,7 @@
   const status = (s, live) => {
     if (s && listening) s = 'Listening…';   // early AI notes never replace it while the user talks
     $('status').className = live ? 'live' : '';
-    $('status').innerHTML = '<span></span>'; $('status').firstChild.textContent = s;
+    $('status').innerHTML = '<span></span>'; $('status').firstChild.textContent = window.i18n?.t(s) ?? s;
   };
   const enableSafeMode = () => { status('Safe mode on · Settings turns it off'); post({ safe: true }); };
   $('mode').onclick = enableSafeMode;

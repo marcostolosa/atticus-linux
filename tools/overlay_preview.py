@@ -46,7 +46,7 @@ def main(out: str) -> None:
         t = 0
         for at, fn, name in steps:
             GLib.timeout_add(at, lambda fn=fn: (fn(), False)[1])
-            GLib.timeout_add(at + 1100, lambda name=name: (subprocess.run(["grim", "-g", "600,0 720x560", os.path.join(out, name + ".png")]), False)[1])
+            GLib.timeout_add(at + 1100, lambda name=name: (subprocess.run(["grim", "-g", "380,0 560x420", os.path.join(out, name + ".png")]), False)[1])
             t = at + 1100
         GLib.timeout_add(t + 400, lambda: (app.quit(), False)[1])
 

@@ -568,6 +568,11 @@ def main(argv: list[str]) -> int:
     if cmd == "control" and len(argv) >= 2:
         from . import control
         rest = " ".join(argv[1:])
+        if rest.split()[0] == "glass" and len(rest.split()) == 2 and rest.split()[1] in ("on", "off"):   # a Hyprland setting, not the app's
+            from . import shortcuts
+            why = shortcuts.glass(rest.split()[1] == "on")
+            print(why or ("Frosted glass is " + rest.split()[1] + ". Restart Atticus (or open a new box) to see it."), file=sys.stderr if why else sys.stdout)
+            return 1 if why else 0
         if control.send(rest):
             return 0
         # A key bound in Hyprland has no terminal to print in: say it on the desktop too.

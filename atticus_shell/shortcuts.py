@@ -189,3 +189,41 @@ def install() -> list[str]:
 
 if __name__ == "__main__":
     print("\n".join(install()))
+
+
+GLASS_BEGIN = "-- atticus:glass begin"
+GLASS_END = "-- atticus:glass end"
+GLASS_BLOCK = f"""{GLASS_BEGIN}
+-- Frosted glass behind Atticus's boxes, with the blur Omarchy's Glassy bar uses.
+-- Hyprland needs blur on globally for a layer to blur; only layers named here ask
+-- for it. Remove this block with: atticus-ctl glass off
+require("default.hypr.glass")()
+hl.layer_rule({{ match = {{ namespace = "^atticus" }}, blur = true, ignore_alpha = 0.0 }})
+{GLASS_END}
+"""
+
+
+def blur_enabled() -> bool:
+    """Whether Hyprland is blurring at all (the boxes are more see-through only when it is)."""
+    return "true" in _hyprctl("getoption", "decoration:blur:enabled").split("\n")[0].lower()
+
+
+def glass(on: bool) -> str:
+    """Add or remove the blur block in Hyprland's looknfeel.lua. Returns '' when done, or why not."""
+    file = path().with_name("looknfeel.lua")
+    try:
+        before = file.read_text()
+    except OSError:
+        return f"{file} was not found."
+    clean = re.sub(rf"\n?{re.escape(GLASS_BEGIN)}.*?{re.escape(GLASS_END)}\n", "\n", before, flags=re.S).rstrip("\n") + "\n"
+    after = clean + ("\n" + GLASS_BLOCK if on else "")
+    if after == before:
+        return ""
+    file.write_text(after)
+    _hyprctl("reload")
+    errors = _hyprctl("configerrors").strip()
+    if errors and errors != "ok":
+        file.write_text(before)
+        _hyprctl("reload")
+        return "Hyprland refused the blur lines, so nothing was changed."
+    return ""

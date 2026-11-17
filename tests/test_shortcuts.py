@@ -87,6 +87,21 @@ class ShortcutsTest(unittest.TestCase):
         self.assertTrue(self.file.read_text().endswith('o.bind("CTRL + ALT + COMMA", "Atticus settings", "/bin/atticus-ctl settings")\n'))
         self.assertEqual(shortcuts.install(), ["Atticus (voice): Super+Alt+A", "Atticus dictation: Ctrl+Alt+D", "Atticus settings: Ctrl+Alt+,"])
 
+    def test_glass_block_is_added_once_and_removed_cleanly(self):
+        look = Path(self.tmp.name, "looknfeel.lua")
+        look.write_text("-- my look\nhl.config({})\n")
+        self.assertEqual(shortcuts.glass(True), "")
+        self.assertEqual(shortcuts.glass(True), "")           # asking again changes nothing
+        text = look.read_text()
+        self.assertEqual(text.count(shortcuts.GLASS_BEGIN), 1)
+        self.assertIn('namespace = "^atticus"', text)
+        self.assertTrue(text.startswith("-- my look\nhl.config({})\n"))
+        self.assertEqual(shortcuts.glass(False), "")
+        self.assertEqual(look.read_text(), "-- my look\nhl.config({})\n")   # exactly as it was
+        self.errors = "looknfeel.lua:9: bad"
+        self.assertIn("refused", shortcuts.glass(True))
+        self.assertEqual(look.read_text(), "-- my look\nhl.config({})\n")
+
     def test_no_file(self):
         self.file.unlink()
         self.assertIn("was not found", shortcuts.write("talk", "SUPER + ALT + J"))

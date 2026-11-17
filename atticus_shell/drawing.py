@@ -230,7 +230,7 @@ class ScreenDrawing:
         css = Gtk.CssProvider()
         css.load_from_data(b"""
 window.atticus-draw, window.atticus-draw > * { background: transparent; }
-.atticus-caption { background-image: linear-gradient(180deg, rgba(34,34,40,0.96), rgba(18,18,22,0.96)); color: #f5f5f7;
+.atticus-caption { background-image: linear-gradient(180deg, rgba(34,34,40,0.90), rgba(18,18,22,0.90)); color: #f5f5f7;
                    border-radius: 22px; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.10); }
 .atticus-caption label { color: #fff; font-size: 15px; }
 .atticus-caption .count { color: rgba(255,255,255,0.55); font-size: 12px; }

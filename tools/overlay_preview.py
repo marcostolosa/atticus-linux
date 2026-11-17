@@ -3,7 +3,7 @@
     LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so .venv/bin/python tools/overlay_preview.py OUT_DIR
 
 A second overlay is opened in its own process (the running one is left alone),
-fed the same calls the shell makes, and the top-left corner of the screen is
+fed the same calls the shell makes, and the top centre of the screen is
 captured with grim after each. The pictures show whatever is behind the box,
 so run it over something ordinary.
 """
@@ -46,7 +46,7 @@ def main(out: str) -> None:
         t = 0
         for at, fn, name in steps:
             GLib.timeout_add(at, lambda fn=fn: (fn(), False)[1])
-            GLib.timeout_add(at + 1100, lambda name=name: (subprocess.run(["grim", "-g", "0,0 640x560", os.path.join(out, name + ".png")]), False)[1])
+            GLib.timeout_add(at + 1100, lambda name=name: (subprocess.run(["grim", "-g", "600,0 720x560", os.path.join(out, name + ".png")]), False)[1])
             t = at + 1100
         GLib.timeout_add(t + 400, lambda: (app.quit(), False)[1])
 

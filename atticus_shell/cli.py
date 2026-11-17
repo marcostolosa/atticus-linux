@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -567,7 +568,14 @@ def main(argv: list[str]) -> int:
     if cmd == "control" and len(argv) >= 2:
         from . import control
         rest = " ".join(argv[1:])
-        return 0 if control.send(rest) else 3
+        if control.send(rest):
+            return 0
+        # A key bound in Hyprland has no terminal to print in: say it on the desktop too.
+        text = "Atticus is not running. Start it with: systemctl --user start atticus"
+        print(text, file=sys.stderr)
+        if rest.split()[0] in ("press", "toggle", "dictate", "settings", "meeting", "setup") and shutil.which("notify-send"):
+            subprocess.run(["notify-send", "-a", "Atticus", "-u", "low", "Atticus", text], capture_output=True, timeout=3)
+        return 3
     # Unimplemented native command in v1: fail so the brain degrades.
     return 1
 

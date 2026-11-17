@@ -45,6 +45,8 @@ command -v brave >/dev/null || command -v chromium >/dev/null || command -v goog
   || echo "Note: no Chromium browser found (brave, chromium, chrome); websites will be used by picture and mouse only."
 python3 -c 'import gi; gi.require_version("WebKit","6.0"); gi.require_version("Gtk4LayerShell","1.0")' 2>/dev/null \
   || need_sys+=("webkitgtk-6.0 gtk4-layer-shell python-gobject")
+# clicking programs by the names of their controls goes through the accessibility bus
+python3 -c 'import gi; gi.require_version("Atspi","2.0")' 2>/dev/null || need_sys+=("at-spi2-core")
 if [ ${#need_sys[@]} -gt 0 ]; then
   echo "Missing system packages. On Omarchy/Arch run:"
   echo "    sudo pacman -S --needed $(printf '%s ' "${need_sys[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
@@ -78,6 +80,15 @@ if "$VENV/bin/python" -c "import piper" 2>/dev/null; then
   fi
 fi
 
+# The speech model that runs on this computer whenever no speech server answers.
+# Fetched now (about 480 MB, once) so the first request does not wait for it.
+if "$VENV/bin/python" -c "from faster_whisper.utils import download_model; download_model('small', local_files_only=True)" 2>/dev/null; then :; else
+  echo "Downloading the speech model 'small' (about 480 MB, once)…"
+  "$VENV/bin/python" -c "from faster_whisper.utils import download_model; download_model('small')" >/dev/null 2>&1 \
+    && echo "Speech model ready." \
+    || echo "Note: speech model not downloaded (offline?); it will be fetched the first time it is needed."
+fi
+
 # --- launchers -------------------------------------------------------------
 BIN="$HOME/.local/bin"
 mkdir -p "$BIN"
@@ -104,6 +115,8 @@ case ":$PATH:" in *":$BIN:"*) ;; *) echo "Note: add $BIN to PATH.";; esac
 # nothing here needs the `input` group or /dev/uinput. Atticus switches
 # accessibility on itself when it starts. Raw mouse input by position
 # (ydotool) is an opt-in: set "rawInput": true and install ydotool yourself.
+# Optional hardening, run once with sudo: tools/setup-atticus-user.sh makes the
+# model's own shell commands run as a separate `atticus` system user.
 
 # --- systemd user service --------------------------------------------------
 # A user service (never system/root): it needs the Wayland session, mic and

@@ -23,6 +23,8 @@ gi.require_version("WebKit", "6.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, WebKit  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
+from . import stack  # noqa: E402
+
 RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
 UI = RES / "ui"
 
@@ -160,15 +162,9 @@ class Overlay:
         LayerShell.set_namespace(w, "atticus")
         LayerShell.set_layer(w, LayerShell.Layer.OVERLAY)
         LayerShell.set_keyboard_mode(w, LayerShell.KeyboardMode.ON_DEMAND)
-        top = self.corner.startswith("top")
-        right = self.corner.endswith("right")
-        LayerShell.set_anchor(w, LayerShell.Edge.TOP, top)
-        LayerShell.set_anchor(w, LayerShell.Edge.BOTTOM, not top)
-        LayerShell.set_anchor(w, LayerShell.Edge.LEFT, not right)
-        LayerShell.set_anchor(w, LayerShell.Edge.RIGHT, right)
-        LayerShell.set_margin(w, LayerShell.Edge.TOP, MARGIN)
-        LayerShell.set_margin(w, LayerShell.Edge.LEFT, MARGIN)
-        LayerShell.set_margin(w, LayerShell.Edge.RIGHT, MARGIN)
+        stack.anchor(w)   # top centre, under the clock; the boxes stack there (stack.py)
+        stack.update("box", window=w, height=BOX_H_DEFAULT, visible=False)
+        w.connect("notify::visible", lambda win, _p: stack.update("box", visible=win.get_visible()))
 
     # --- page lifecycle -----------------------------------------------------
     def load(self, name: str):
@@ -267,6 +263,7 @@ class Overlay:
         cur_w = self.web.get_size_request().width if hasattr(self.web, "get_size_request") else BOX_W_DEFAULT
         w = width if width else (cur_w if cur_w and cur_w > 0 else BOX_W_DEFAULT)
         self.web.set_size_request(w, height)
+        stack.update("box", height=height)
 
     # --- visibility ---------------------------------------------------------
     def present(self):

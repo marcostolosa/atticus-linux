@@ -38,6 +38,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import stack
+
 import numpy as np
 
 from . import settings as cfg
@@ -300,18 +302,16 @@ class MeetingCopilot:
         win.set_decorated(False)
         win.add_css_class("atticus-meeting")
         css = Gtk.CssProvider()
-        css.load_from_data(b"window.atticus-meeting { background: rgba(28,28,30,0.96); border-radius: 18px; }"
-                           b"window.atticus-meeting > * { background: transparent; border-radius: 18px; }")
+        css.load_from_data(b"window.atticus-meeting, window.atticus-meeting > * { background: transparent; }")   # the page draws the glass
         from gi.repository import Gdk
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         LayerShell.init_for_window(win)
         LayerShell.set_namespace(win, "atticus-meeting")
         LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
         LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.ON_DEMAND)
-        LayerShell.set_anchor(win, LayerShell.Edge.TOP, True)
-        LayerShell.set_anchor(win, LayerShell.Edge.LEFT, True)
-        LayerShell.set_margin(win, LayerShell.Edge.TOP, 12)
-        LayerShell.set_margin(win, LayerShell.Edge.LEFT, 12)
+        stack.anchor(win)   # top centre, above the assistant's box (stack.py)
+        stack.update("meeting", window=win, height=470, visible=True)
+        win.connect("notify::visible", lambda w, _p: stack.update("meeting", visible=w.get_visible()))
         self.page = Page(self._message, page="meeting.html", handler="meeting", obj="meeting")
         self.page.web.set_size_request(340, 470)
         win.set_child(self.page.web)
@@ -333,6 +333,7 @@ class MeetingCopilot:
         most = self._most_height()
         want = min(self.expanded[1], most) if h <= 0 else int(min(most, max(44 if self.minimized else 80, h)))
         self.page.web.set_size_request(116 if self.minimized else self.expanded[0], want)
+        stack.update("meeting", height=want)
         if reveal is not None:
             self.js("settled", reveal)
 

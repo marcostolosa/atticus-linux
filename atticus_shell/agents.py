@@ -4,7 +4,7 @@ The work itself is done by the brain's supervisor (`atticus.py --agents`), one
 long-lived process that starts, steers and records each task. This module is
 its face on the desktop:
 
-  the shelf   a small column of chips at the top-right corner, one per task
+  the shelf   a small column of chips at the top centre, one per task
               that is working, asking something or just finished
   the view    a window with every task, its steps, its result and saved chats
 
@@ -36,6 +36,7 @@ from gi.repository import Gdk, GLib, Gtk, WebKit  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 from . import settings as cfg
+from . import stack
 from .overlay import load_page
 
 RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
@@ -232,10 +233,9 @@ class AgentPanels:
         LayerShell.set_namespace(win, "atticus-agents")
         LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
         LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.ON_DEMAND)   # an answer can be typed into a chip
-        LayerShell.set_anchor(win, LayerShell.Edge.TOP, True)
-        LayerShell.set_anchor(win, LayerShell.Edge.RIGHT, True)
-        LayerShell.set_margin(win, LayerShell.Edge.TOP, 12)
-        LayerShell.set_margin(win, LayerShell.Edge.RIGHT, 12)
+        stack.anchor(win)   # top centre, below the assistant's box (stack.py)
+        stack.update("shelf", window=win, height=52, visible=False)
+        win.connect("notify::visible", lambda w, _p: stack.update("shelf", visible=w.get_visible()))
         self.shelf_page = Page(lambda body: self._message("shelf", body))
         self.shelf_page.web.set_size_request(SHELF_W, 52)
         win.set_child(self.shelf_page.web)   # the layer takes the view's size, and shrinks with it
@@ -450,6 +450,7 @@ class AgentPanels:
             if surface == "shelf" and self.shelf and isinstance(h, (int, float)) and 0 < h < 4000:
                 height = max(52, int(h))
                 self.shelf_page.web.set_size_request(SHELF_W, height)
+                stack.update("shelf", height=height)
         elif action == "dismiss":
             if done:
                 self.send({"action": "seen", "id": identifier})

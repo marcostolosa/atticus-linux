@@ -33,7 +33,7 @@ Wayland with GTK4, WebKitGTK and gtk4-layer-shell.
 ## Features
 
 - Corner overlay that never steals focus, built on wlr-layer-shell.
-- Push to talk by hotkey, plus an optional always-on wake word ("siri").
+- Push to talk by hotkey, plus an optional always-on wake word ("atticus" by default).
 - Speech recognition tuned for Brazilian Portuguese (faster-whisper), English also supported. Fully local.
 - Natural neural voice with Piper, kept loaded so answers start speaking at once.
 - **Instant commands, no AI round trip** (Portuguese and English): timers, alarms,
@@ -69,8 +69,10 @@ Clicks and key presses ask first. `"safe": false` in settings turns the sandbox 
 - System packages: `webkitgtk-6.0`, `gtk4-layer-shell`, `python-gobject`,
   `pipewire-pulse`, `grim`, `slurp`, `wl-clipboard`, `tesseract`,
   `tesseract-data-eng`, `tesseract-data-por`, `espeak-ng`, `ffmpeg`, `fd`,
-  `ripgrep`, `ydotool`, `wtype`, `playerctl`, `bubblewrap`, `libnotify`,
-  `wireplumber`, `brightnessctl`.
+  `ripgrep`, `wtype`, `playerctl`, `bubblewrap`, `libnotify`,
+  `wireplumber`, `brightnessctl`, `at-spi2-core`. Optional: `zenity` (a
+  window for questions when the box is not showing), `mpv` and `yt-dlp`
+  (music by name without Spotify), `acl` (the separate-user hardening below).
 - Python 3.11 or newer.
 - A command-line assistant for the brain. By default Atticus calls the
   [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI (`claude`),
@@ -89,7 +91,7 @@ cd atticus-linux
 ```
 
 `build.sh` creates a virtual environment, installs the Python dependencies,
-downloads the default Portuguese voice, writes the `atticus` and `atticus-ctl`
+downloads the default Portuguese voice and the speech model, writes the `atticus` and `atticus-ctl`
 launchers into `~/.local/bin`, and installs and starts the user service.
 
 It also binds the keys, as lines in `~/.config/hypr/bindings.lua` (a key that
@@ -192,8 +194,8 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `speak` | `true` | Read answers aloud. |
 | `ttsVoice` | `"pt_BR-faber-medium"` | Piper voice name under `models/`. |
 | `sounds` | `true` | Play the start and stop chimes. |
-| `wake` | `false` | Enable the always-on wake word. |
-| `wakeWord` | `"siri"` | The word that starts listening. |
+| `wakeWord` | `false` | Turn on the always-on wake word. |
+| `wakeWordName` | `"atticus"` | The word that starts listening. |
 | `isolatedUser` | `true` | Run the model's own shell commands as the `atticus` system user when `tools/setup-atticus-user.sh` has been run. |
 | `rawInput` | `false` | Allow clicks, drags and scrolls by screen position through `ydotool` (needs it installed and your user in the `input` group). Off by default: controls are used by name. |
 | `asrModel` | `"small"` | Whisper model. `"base"` answers about 2 s sooner on a laptop CPU but mishears more. |
@@ -248,7 +250,7 @@ do … no YouTube") goes to the model.
 
 ## Wake word
 
-With `wake` on and no trained model present, Atticus uses a speech-to-text
+With `wakeWord` on and no trained model present, Atticus uses a speech-to-text
 fallback to spot the word, which works right away but costs more CPU. For a
 robust always-on trigger, train a small dedicated model on a machine with an
 NVIDIA GPU and copy the resulting `.onnx` into `models/`. See

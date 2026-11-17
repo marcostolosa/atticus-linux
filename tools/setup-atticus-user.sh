@@ -1,6 +1,7 @@
 #!/bin/sh
 # Creates the `atticus` system user that the model's shell commands run as.
 # Run once, as root:   sudo sh tools/setup-atticus-user.sh
+#                  or: pkexec sh tools/setup-atticus-user.sh   (a password window, no terminal)
 #
 # What it does, and nothing else:
 #   - a system user and group `atticus`, no login shell, no password, no sudo
@@ -12,7 +13,8 @@
 set -eu
 [ "$(id -u)" = 0 ] || { echo "Run this with sudo."; exit 1; }
 WHO="${SUDO_USER:-}"
-[ -n "$WHO" ] && [ "$WHO" != root ] || { echo "Run it with sudo from your own account, not from a root shell."; exit 1; }
+[ -n "$WHO" ] || { [ -n "${PKEXEC_UID:-}" ] && WHO="$(id -nu "$PKEXEC_UID")"; }
+[ -n "$WHO" ] && [ "$WHO" != root ] || { echo "Run it with sudo or pkexec from your own account, not from a root shell."; exit 1; }
 command -v bwrap >/dev/null || { echo "bubblewrap is not installed (pacman -S bubblewrap)."; exit 1; }
 command -v setfacl >/dev/null || { echo "setfacl is not installed (pacman -S acl)."; exit 1; }
 

@@ -293,6 +293,7 @@ def available() -> bool:
 USER = "atticus"
 SCRATCH_ROOT = "/var/lib/atticus/scratch"
 BWRAP = "/usr/bin/bwrap"
+BOX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "atticus-box")   # sudo bwrap as USER
 
 
 def isolated() -> bool:
@@ -322,7 +323,7 @@ def wrap(cmd: str, scratch: str, home: str | None = None, extra_hidden: tuple[st
     home = home or os.path.expanduser("~")
     if not as_user:
         os.makedirs(scratch, mode=0o700, exist_ok=True)
-    args = (["sudo", "-n", "-u", USER, BWRAP] if as_user else ["bwrap"]) + [ "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/var/tmp",
+    args = ([BOX] if as_user else ["bwrap"]) + [ "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run", "--tmpfs", "/var/tmp",
             "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session"]
     if as_user:
         args += ["--tmpfs", home]

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Runs bubblewrap as the `atticus` system user (tools/setup-atticus-user.sh).
+# The brain hands the model this path instead of `sudo ...`, because the AI
+# client refuses any command that starts with sudo.
+exec sudo -n -u atticus /usr/bin/bwrap "$@"

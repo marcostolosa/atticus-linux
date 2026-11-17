@@ -230,14 +230,15 @@ class ScreenDrawing:
         css = Gtk.CssProvider()
         css.load_from_data(b"""
 window.atticus-draw, window.atticus-draw > * { background: transparent; }
-.atticus-caption { background: rgba(22,22,24,0.94); color: #fff; border-radius: 14px; padding: 12px 14px;
-                   border: 1px solid rgba(255,255,255,0.14); }
+.atticus-caption { background-image: linear-gradient(180deg, rgba(34,34,40,0.96), rgba(18,18,22,0.96)); color: #f5f5f7;
+                   border-radius: 22px; padding: 12px 16px; border: 1px solid rgba(255,255,255,0.10); }
 .atticus-caption label { color: #fff; font-size: 15px; }
 .atticus-caption .count { color: rgba(255,255,255,0.55); font-size: 12px; }
-.atticus-caption button { background: rgba(255,255,255,0.12); color: #fff; border: none; border-radius: 8px;
-                          padding: 4px 12px; min-height: 0; box-shadow: none; }
-.atticus-caption button:hover { background: rgba(255,255,255,0.22); }
-.atticus-caption button.go { background: #0a84ff; }
+.atticus-caption button { background: rgba(255,255,255,0.09); color: #f5f5f7; border: none; border-radius: 14px;
+                          padding: 0 14px; min-height: 28px; box-shadow: none; }
+.atticus-caption button:hover { background: rgba(255,255,255,0.15); }
+.atticus-caption button.go { background: #0a84ff; color: #fff; }
+.atticus-caption button.go:hover { background: #2b95ff; }
 """)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 

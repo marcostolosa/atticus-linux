@@ -69,8 +69,10 @@ class AtspiTest(unittest.TestCase):
 
     def test_key_combinations(self):
         self.assertEqual(atspi.parse_combo("ctrl+shift+t"), ("CTRL SHIFT", "t"))
-        self.assertEqual(atspi.parse_combo("Return"), ("", "Return"))
-        self.assertEqual(atspi.parse_combo("alt+F4"), ("ALT", "F4"))
+        self.assertEqual(atspi.parse_combo("Return"), ("", "code:36"))   # by code: names fail on some keyboards' keymaps
+        self.assertEqual(atspi.parse_combo("alt+F4"), ("ALT", "code:70"))
+        self.assertEqual(atspi.parse_combo("PageDown"), ("", "code:117"))
+        self.assertEqual(atspi.parse_combo("f12"), ("", "code:96"))
         for bad in ("", "ctrl", "ctrl+", "ctrl+alt+nonsense", "rm -rf"):
             self.assertIsNone(atspi.parse_combo(bad), bad)
 
@@ -93,6 +95,18 @@ class FindWindowTest(unittest.TestCase):
             self.assertEqual(atspi.find_window("atticusform")["pid"], 1)
             self.assertEqual(atspi.find_window("chrome", "atticusform")["pid"], 1)
             self.assertEqual(atspi.find_window("nothing"), {})
+
+
+class TargetWindowTest(unittest.TestCase):
+    def test_keys_go_to_the_window_that_was_looked_at_while_it_exists(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"ATTICUS_DIR": tmp}):
+            atspi.save({"address": "0xaaa", "pid": 1, "class": "a", "title": "A"}, [])
+            wins = [{"address": "0xbbb"}, {"address": "0xaaa"}]
+            with mock.patch.object(atspi, "windows", lambda: wins), mock.patch.object(atspi, "front", lambda: {"address": "0xbbb"}):
+                self.assertEqual(atspi.target_window()["address"], "0xaaa")
+                self.assertEqual(atspi.target_window(max_age=-1)["address"], "0xbbb")   # too old: the front one
+            with mock.patch.object(atspi, "windows", lambda: [{"address": "0xbbb"}]), mock.patch.object(atspi, "front", lambda: {"address": "0xbbb"}):
+                self.assertEqual(atspi.target_window()["address"], "0xbbb")   # it closed
 
 
 if __name__ == "__main__":

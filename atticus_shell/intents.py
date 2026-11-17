@@ -456,7 +456,7 @@ def parse(text: str, now: float | None = None, home: bool | None = None, device:
     if m:
         on = bool(re.match(r"lig|ativ|habilit|turn on|enable|on$", m.group("verb")))
         return I("radio", which="bluetooth" if "blue" in m.group("what") else "wifi", on=on)
-    if re.fullmatch(r"(?:bloqueia|bloqueie|bloquear|tranca|tranque|trancar|lock)(?: (?:a |o |the |my )?(?:tela|computador|pc|screen|computer))?", t):
+    if re.fullmatch(r"(?:bloqueia|bloqueie|bloquear|tranca|tranque|trancar|trava|trave|travar|lock)(?: (?:a |o |the |my )?(?:tela|computador|pc|screen|computer))?", t):
         return I("lock")
 
     # --- lists ---

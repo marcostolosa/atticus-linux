@@ -26,9 +26,9 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 RES = Path(os.environ.get("ATTICUS_RESOURCES_DIR", Path(__file__).resolve().parent.parent))
 UI = RES / "ui"
 
-BOX_W_DEFAULT = 500
-BOX_H_DEFAULT = 420
-MARGIN = 16
+BOX_W_DEFAULT = 400
+BOX_H_DEFAULT = 80   # the page reports its real height as soon as it loads
+MARGIN = 12
 
 
 def _settings() -> dict:
@@ -54,14 +54,30 @@ def _ui_language() -> str:
 
 
 def load_page(name: str) -> str:
-    """A page as one document: orbs.js and i18n.js go in at their markers."""
+    """A page as one document: orbs.js and i18n.js go in at their markers, the shared look (theme.css) after the page's own styles."""
     html = (UI / name).read_text(encoding="utf-8")
     orbs = _read(UI / "orbs.js")
     i18n = _read(UI / "i18n.js")
     lang = _ui_language()
     auto = _ui_language()  # resolve("auto") == resolved default
     header = f"window.atticusLanguage = {json.dumps(lang)}; window.atticusAutoLanguage = {json.dumps(auto)};\n"
-    return html.replace("/*ORBS*/", orbs).replace("/*I18N*/", header + i18n)
+    theme = "<style id=\"atticus-theme\">" + _read(UI / "theme.css") + "</style>"
+    page = html.replace("/*ORBS*/", orbs).replace("/*I18N*/", header + i18n)
+    return page.replace("</head>", theme + "</head>", 1) if "</head>" in page else theme + page
+
+
+_WINDOW_CSS = False
+
+
+def style_windows() -> None:
+    """The three ordinary windows (Settings, Setup, Agents) share one background, the same as theme.css's --a-surface-solid."""
+    global _WINDOW_CSS
+    if _WINDOW_CSS:
+        return
+    _WINDOW_CSS = True
+    css = Gtk.CssProvider()
+    css.load_from_data(b"window.atticus-window { background: #1e1e20; }")
+    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
 
 def _read(p: Path) -> str:
@@ -86,7 +102,6 @@ class Overlay:
 
         self.window = Gtk.ApplicationWindow(application=app)
         self.window.set_decorated(False)
-        self.window.set_default_size(BOX_W_DEFAULT, BOX_H_DEFAULT)
 
         # Transparent: the card draws its own rounded background and shadow.
         self.window.add_css_class("atticus-overlay")
@@ -103,7 +118,9 @@ class Overlay:
         ucm.connect("script-message-received::h", self._on_h)
 
         self.web = WebKit.WebView(user_content_manager=ucm)
-        self.web.set_background_color(Gdk.RGBA())  # fully transparent (all zeros)
+        bg = Gdk.RGBA()
+        bg.parse("rgba(0,0,0,0)")   # a bare Gdk.RGBA() paints #1e1e1e here; the card draws its own glass
+        self.web.set_background_color(bg)
         self.web.set_size_request(BOX_W_DEFAULT, BOX_H_DEFAULT)
         try:
             # Let localhost / file content and media autoplay behave for the UI.

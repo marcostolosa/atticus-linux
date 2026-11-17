@@ -27,6 +27,9 @@ class SettingsWindow:
         self.app = app
         self.on_quit = on_quit or (lambda: app.quit())
         self.window = Gtk.ApplicationWindow(application=app, title="Atticus Settings")
+        from .overlay import style_windows
+        style_windows()
+        self.window.add_css_class("atticus-window")
         self.window.set_default_size(920, 640)
         self.window.connect("close-request", self._on_close)
         self._ready = False

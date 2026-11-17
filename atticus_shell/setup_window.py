@@ -69,6 +69,9 @@ class SetupWindow:
     def __init__(self, app, on_done=None, open_settings=None):
         self.app, self.on_done, self.open_settings = app, on_done or (lambda: None), open_settings or (lambda: None)
         self.window = Gtk.ApplicationWindow(application=app, title="Atticus Setup")
+        from .overlay import style_windows
+        style_windows()
+        self.window.add_css_class("atticus-window")
         self.window.set_default_size(640, 640)
         self.window.connect("close-request", lambda *_: (self.close(), True)[1])
         self.page = Page(self._message, page="onboarding.html", handler="ob", obj="ob")

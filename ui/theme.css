@@ -1,0 +1,35 @@
+/* One look for every Atticus box: the overlay, the agent shelf and window, the meeting panel, the setup and
+   settings windows, and the drawing caption (drawing.py repeats these values for GTK). It is placed after each
+   page's own styles, so these values win. Change a number here, not in a page. */
+:root {
+  --a-font: system-ui, Inter, Cantarell, sans-serif;
+  --a-surface: linear-gradient(180deg, rgba(34,34,40,.96), rgba(18,18,22,.96));   /* a floating panel */
+  --a-surface-solid: #1e1e20;                                                      /* a normal window */
+  --a-stroke: inset 0 0 0 1px rgba(255,255,255,.10), inset 0 1px 0 rgba(255,255,255,.08);
+  --a-radius: 22px;       /* panels */
+  --a-radius-card: 14px;  /* cards inside a panel */
+  --a-radius-btn: 14px;   /* a 28px button is a pill */
+  --a-btn-h: 28px;
+  --a-accent: #0a84ff;
+  --a-accent-hover: #2b95ff;
+  --a-danger: #ff453a;
+  --a-fill: rgba(255,255,255,.09);
+  --a-fill-hover: rgba(255,255,255,.15);
+  --a-text: #f5f5f7;
+  --a-text2: #c7c7cc;
+  --a-text3: #8e8e93;
+  --a-pad: 16px;
+}
+html, body { font-family: var(--a-font); }
+
+/* panels */
+.chip, .agent-card, .pk, .ok { border-radius: var(--a-radius-card); }
+.chip { background: var(--a-surface); box-shadow: var(--a-stroke), 0 6px 18px rgba(0,0,0,.28); }
+body.view { background: var(--a-surface-solid); }
+
+/* buttons: the same height, shape and colours everywhere; icon buttons keep their own size */
+button { font-family: var(--a-font); }
+button:not(.ctl button):not([class*="icon"]):not(.x):not(#fold):not(.kf):not(.cap) { min-height: var(--a-btn-h); border-radius: var(--a-radius-btn); }
+button.go, .btn.blue { background: var(--a-accent); color: #fff; box-shadow: none; }
+button.go:hover, button.go.hot, .btn.blue:hover { background: var(--a-accent-hover); }
+:focus-visible { outline: 2px solid var(--a-accent); outline-offset: 2px; }

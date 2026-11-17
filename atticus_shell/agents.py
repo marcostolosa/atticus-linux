@@ -248,9 +248,9 @@ class AgentPanels:
             win = Gtk.ApplicationWindow(application=self.app, title="Atticus Agents")
             win.set_default_size(760, 580)
             win.add_css_class("atticus-agents")
-            css = Gtk.CssProvider()
-            css.load_from_data(b"window.atticus-agents { background: #1c1c1e; }")
-            Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            from .overlay import style_windows
+            style_windows()
+            win.add_css_class("atticus-window")
             win.connect("close-request", lambda *_: (self._close_view(), True)[1])
             self.view_page = Page(lambda body: self._message("view", body))
             win.set_child(self.view_page.web)

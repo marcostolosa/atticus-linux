@@ -4,9 +4,10 @@
 <style>
   :root { color-scheme: dark; --fg2: #c7c7cc; --accent: #006bd6; --ease: cubic-bezier(.2,.8,.2,1); --spring: cubic-bezier(.34,1.56,.64,1); }
   html, body { margin: 0; background: transparent; overflow: hidden; -webkit-user-select: none; cursor: default;
-    font: 13px -apple-system, system-ui, sans-serif; color: #f5f5f7; -webkit-font-smoothing: antialiased; }
+    font: 13px system-ui, Inter, Cantarell, sans-serif; color: #f5f5f7; -webkit-font-smoothing: antialiased; }
   html { background: transparent; }   /* native glass tint sits below the live window layer */
-  #card { padding: 14px 20px 18px; animation: pop .42s var(--spring) both; box-sizing: border-box;
+  #card { padding: 10px 16px 14px; animation: pop .42s var(--spring) both; box-sizing: border-box;
+    border-radius: var(--a-radius, 22px); background: var(--a-surface); box-shadow: var(--a-stroke);
     display: flex; flex-direction: column; max-height: var(--screen-height, 10000px); }
   #card.again { animation: none; }
   #card.held { box-sizing: border-box; display: flex; flex-direction: column; }   /* dragged to a height: keep it */
@@ -26,15 +27,15 @@
   body.folded:is(:hover,.hot) #fold, body.folded #fold:focus-visible { opacity: 1; pointer-events: auto; }
   body.folded #status span:empty::before { content: 'Done'; }
 
-  #head { display: flex; align-items: center; gap: 7px; height: 44px; flex: none; }
-  canvas { width: 44px; height: 44px; flex: none; margin-left: -4px; transition: transform .35s var(--ease); }
+  #head { display: flex; align-items: center; gap: 7px; height: 36px; flex: none; }
+  canvas { width: 36px; height: 36px; flex: none; margin-left: -2px; transition: transform .35s var(--ease); }
   #status { flex: 1 0 64px; min-width: 64px; font-size: 12.5px; line-height: 22px; color: var(--fg2); white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; }
   .elapsed { display: flex; align-items: baseline; gap: 6px; margin-top: 16px; color: var(--fg2); font-size: 10.5px; line-height: 16px; animation: in .25s var(--ease) both; }
   .elapsed .hf { margin-left: 8px; }
   .elapsed .hf i { font-style: normal; animation: hfdot 1.4s infinite both; } .elapsed .hf i:nth-child(2) { animation-delay: .2s; } .elapsed .hf i:nth-child(3) { animation-delay: .4s; }
   @keyframes hfdot { 0% { opacity: 0; } 25%, 60% { opacity: 1; } 85%, 100% { opacity: 0; } }   /* hands-free: dots fade in one by one, then out */
-  .elapsed .redo { margin-left: auto; padding: 0; border: 0; background: none; font: 500 11px -apple-system, system-ui, sans-serif; color: var(--fg2); cursor: pointer; transition: color .2s; }
+  .elapsed .redo { margin-left: auto; padding: 0; border: 0; background: none; font: 500 11px system-ui, Inter, Cantarell, sans-serif; color: var(--fg2); cursor: pointer; transition: color .2s; }
   .elapsed .redo:is(:hover,.hot) { color: #f5f5f7; }
   .elapsed b { color: var(--fg2); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
   #status span { display: inline-block; max-width: 100%; vertical-align: top; overflow: hidden; text-overflow: ellipsis; animation: in .35s var(--ease) both; }
@@ -130,9 +131,9 @@
   @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
   .mini.live .mini-fallback { opacity: 0; pointer-events: none; }
   .mini-fallback img { width: 34px; height: 34px; object-fit: contain; filter: drop-shadow(0 4px 10px rgba(0,0,0,.4)); }
-  .mini-title { max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px -apple-system, system-ui; color: var(--fg2); }
+  .mini-title { max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px system-ui, system-ui; color: var(--fg2); }
   .mini-tag, .mini-hint { position: absolute; top: 8px; display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; box-sizing: border-box;
-    border-radius: 11px; font: 500 11px -apple-system, system-ui; color: #f5f5f7; background: rgba(20,20,22,.72);
+    border-radius: 11px; font: 500 11px system-ui, system-ui; color: #f5f5f7; background: rgba(20,20,22,.72);
     box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14), 0 2px 8px rgba(0,0,0,.3); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
   .mini-tag { left: 8px; max-width: calc(100% - 90px); }
   .mini-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -204,7 +205,7 @@
   .ok code.full { max-height: 165px; overflow-y: auto; color: #d1d1d6; }
   .ok code::-webkit-scrollbar { width: 0; }
   .ok div { display: flex; gap: 8px; margin-top: 11px; }
-  .ok button, .pk .bar button, .rewrite button { flex: 1; height: 28px; border: 0; border-radius: 14px; font: 500 12.5px -apple-system, system-ui, sans-serif; color: #fff;
+  .ok button, .pk .bar button, .rewrite button { flex: 1; height: 28px; border: 0; border-radius: 14px; font: 500 12.5px system-ui, Inter, Cantarell, sans-serif; color: #fff;
     cursor: pointer; background: rgba(255,255,255,.1); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.16); transition: transform .3s var(--spring), background .2s; }
   .ok button.go, .pk .bar button.go, .rewrite button.go { background: var(--accent); box-shadow: none; }
   .ok button:is(:hover,.hot), .pk .bar button:is(:hover,.hot), .rewrite button:not(:disabled):is(:hover,.hot) { transform: scale(1.03); } .ok button:active, .pk .bar button:active, .rewrite button:not(:disabled):active { transform: scale(.96); }
@@ -235,7 +236,7 @@
   .pk .n { font-size: 12px; color: #f5f5f7; } .pk .s { font-size: 10.5px; color: var(--fg2); } .pk .s:empty { display: none; }
   .pk.open .c:not(.on), .pk.open .other { display: none; }
   .pk .other { display: block; width: 100%; box-sizing: border-box; height: 30px; margin: 8px 0 0; padding: 0 11px; border: 0; border-radius: 10px; outline: none;
-    background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14); color: #f5f5f7; font: 12.5px -apple-system, system-ui, sans-serif; transition: box-shadow .2s, background .2s; }
+    background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14); color: #f5f5f7; font: 12.5px system-ui, Inter, Cantarell, sans-serif; transition: box-shadow .2s, background .2s; }
   .pk .other::placeholder { color: var(--fg2); }
   .pk .other:focus { background: rgba(255,255,255,.08); box-shadow: inset 0 0 0 1px #0a84ff; }
   .pk.open .c.on { grid-column: 1 / -1; transform: none; background: rgba(255,255,255,.06); animation: grow .32s var(--spring) both; }
@@ -265,7 +266,7 @@
     animation: pop .5s var(--spring) .4s both; }
   .tip::before { content: attr(data-k); flex: none; font-weight: 600; color: #64d2ff; }
   .tip.learned { background: rgba(48,209,88,.14); box-shadow: inset 0 0 0 .5px rgba(48,209,88,.45); } .tip.learned::before { color: #30db5b; }
-  .tip .off, .ok .details { flex: none; margin-left: auto; padding: 0; border: 0; background: none; font: 500 11px -apple-system, system-ui, sans-serif; color: var(--fg2); cursor: pointer; transition: color .2s; }
+  .tip .off, .ok .details { flex: none; margin-left: auto; padding: 0; border: 0; background: none; font: 500 11px system-ui, Inter, Cantarell, sans-serif; color: var(--fg2); cursor: pointer; transition: color .2s; }
   .tip .off:is(:hover,.hot), .ok .details:is(:hover,.hot) { color: #f5f5f7; }
   .ok.offer { cursor: default; } .ok.offer:is(:hover,.hot) { background: rgba(255,255,255,.07); }   /* a question, not a command: nothing to unfold */
   .ok.offer p { margin: 4px 0 0; font-size: 12px; line-height: 1.4; color: var(--fg2); }
@@ -280,7 +281,7 @@
   /* memory receipt: one quiet row under an answer that remembered or forgot something. Click: it opens in place; click an item: Settings → Memory there */
   .mem { margin-top: 12px; animation: in .35s var(--ease) .15s both; }
   .mem-h { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0; border: 0; cursor: pointer;
-    font: 500 12px -apple-system, system-ui, sans-serif; color: var(--fg2); background: none; transition: color .2s; }
+    font: 500 12px system-ui, Inter, Cantarell, sans-serif; color: var(--fg2); background: none; transition: color .2s; }
   .mem-h:is(:hover,.hot), .mem.open .mem-h { color: #f5f5f7; }
   .mem-h .ic { width: 14px; height: 14px; flex: none; border-radius: 50%; display: grid; place-items: center; background: rgba(48,209,88,.2); }
   .mem.off .mem-h .ic { background: rgba(142,142,147,.22); }
@@ -296,21 +297,21 @@
   .mem-card { margin-top: 6px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.1); }
   .mem-c { padding: 6px 9px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--fg2); }
   .mem-i { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 6px 9px; border: 0; border-radius: 8px; text-align: left; cursor: pointer;
-    font: 12.5px/1.4 -apple-system, system-ui, sans-serif; color: #e5e5ea; background: none; opacity: 0; transform: translateY(-4px);
+    font: 12.5px/1.4 system-ui, Inter, Cantarell, sans-serif; color: #e5e5ea; background: none; opacity: 0; transform: translateY(-4px);
     transition: background .15s, opacity .25s var(--ease), transform .36s var(--ease); }
   .mem.open .mem-i { opacity: 1; transform: none; transition-delay: 0s, calc(60ms + var(--i) * 35ms), calc(60ms + var(--i) * 35ms); }
   .mem-i:is(:hover,.hot) { background: rgba(255,255,255,.07); }
   .mem-i svg { width: 9px; height: 9px; flex: none; stroke: #30d158; transform: translateY(1px); }
   .mem-i.del svg { stroke: #8e8e93; } .mem-i.del span { color: var(--fg2); text-decoration: line-through; }
   .mem-i span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .mem-i em { flex: none; font: 500 11px -apple-system, system-ui, sans-serif; color: var(--fg2); opacity: 0; transition: opacity .2s; }
+  .mem-i em { flex: none; font: 500 11px system-ui, Inter, Cantarell, sans-serif; color: var(--fg2); opacity: 0; transition: opacity .2s; }
   .mem-i:is(:hover,.hot) em, .mem-i:focus-visible em { opacity: 1; }
 
   /* typing box: grows in on hover (or the shortcut, in typing mode); the mic goes back to voice */
   #comp { position: relative; display: flex; align-items: center; gap: 8px; margin-top: 0; height: 0; opacity: 0; overflow: hidden; flex: none; transition: height .24s var(--ease), margin .24s var(--ease), padding .24s var(--ease), opacity .18s; }
   #comp.open { height: 36px; margin: 10px -4px 0; padding: 4px; opacity: 1; }   /* 4px of room inside the clip: round tops, shadows and the hover scale aren't cut flat */
   #model, #models button { flex: none; height: 34px; max-width: 132px; padding: 0 12px; border: 0; border-radius: 17px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    font: 500 12px -apple-system, system-ui, sans-serif; color: var(--fg2); background: rgba(255,255,255,.08); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14);
+    font: 500 12px system-ui, Inter, Cantarell, sans-serif; color: var(--fg2); background: rgba(255,255,255,.08); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14);
     transition: color .2s, background .25s, opacity .22s var(--ease), transform .38s var(--ease); }
   #model:is(:hover,.hot), #models button:is(:hover,.hot) { color: #fff; }
   /* the model row: the choices fan out of the chip while the field and mic fade back; a click mid-way just reverses */
@@ -322,7 +323,7 @@
   #ask { transform-origin: left center; } #comp.pick #ask { opacity: 0; transform: scale(.97); pointer-events: none; }
   #comp.pick #model, #comp.pick #point, #comp.pick #mic { opacity: 0; transform: scale(.8); pointer-events: none; }
   #ask { flex: 1; min-width: 0; height: 34px; box-sizing: border-box; padding: 0 13px; border: 0; outline: 0; border-radius: 17px;
-    font: 13.5px -apple-system, system-ui, sans-serif; color: #fff; caret-color: #0a84ff; -webkit-user-select: text; cursor: text;
+    font: 13.5px system-ui, Inter, Cantarell, sans-serif; color: #fff; caret-color: #0a84ff; -webkit-user-select: text; cursor: text;
     background: rgba(255,255,255,.08); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14); transition: background .25s, box-shadow .25s, opacity .22s var(--ease), transform .38s var(--ease); }
   #ask::placeholder { color: var(--fg2); }
   #ask:focus { background: rgba(255,255,255,.12); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.22), 0 0 0 3px rgba(10,132,255,.35); }
@@ -334,7 +335,7 @@
   #point svg, #mic svg { width: 15px; height: 15px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   #point.active, #point.marked { background: rgba(10,132,255,.55); }
   /* Point at your screen: one row over the typing box. on: the hint; marked: the crop's chip; coach: the one-time intro */
-  #pointbar { display: none; align-items: center; gap: 8px; min-height: 28px; margin-top: 12px; font: 12px -apple-system, system-ui, sans-serif; color: var(--fg2); }
+  #pointbar { display: none; align-items: center; gap: 8px; min-height: 28px; margin-top: 12px; font: 12px system-ui, Inter, Cantarell, sans-serif; color: var(--fg2); }
   #pointbar[data-s] { display: flex; animation: in .3s var(--spring) both; }
   #pointbar .hint { flex: 1; min-width: 0; line-height: 1.35; } #pointbar .hint b { color: #f5f5f7; font-weight: 600; }
   #pointbar .hint svg, #pointbar .chip i svg { width: 13px; height: 13px; margin: 0 1px -2px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -372,7 +373,7 @@
   button:focus-visible { outline: 2px solid #64d2ff; outline-offset: 3px; }
   /* agents: a quiet badge in the header, count + live dot; it opens the Agent view */
   #agents-pill { flex:none; white-space:nowrap; display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 9px 0 8px; border:0; border-radius:11px;
-    background:rgba(255,255,255,.07); box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); color:#d1d1d6; font:500 11px -apple-system, system-ui, sans-serif;
+    background:rgba(255,255,255,.07); box-shadow:inset 0 0 0 .5px rgba(255,255,255,.12); color:#d1d1d6; font:500 11px system-ui, Inter, Cantarell, sans-serif;
     font-variant-numeric:tabular-nums; cursor:pointer; overflow:hidden; animation:in .35s var(--spring) both; transition:background .2s, transform .3s var(--spring); }
   #agents-pill span { white-space:nowrap; }   /* "1 agent" stays on one line; #status beside it gives up the room */
   #agents-pill[hidden] { display:none; } #agents-pill:is(:hover,.hot) { background:rgba(255,255,255,.12); color:#fff; } #agents-pill:active { transform:scale(.95); }
@@ -381,7 +382,7 @@
   /* keycap actions (Raycast-style): label + the key that does it; one blue main action */
   .keys, .ok .keys { display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-top:14px; }
   .ok .keys button, .keys button { flex:none; height:28px; padding:0 6px 0 11px; border-radius:9px; display:inline-flex; align-items:center; gap:7px;
-    background:transparent; box-shadow:none; color:#d1d1d6; font:500 12.5px -apple-system, system-ui, sans-serif; }
+    background:transparent; box-shadow:none; color:#d1d1d6; font:500 12.5px system-ui, Inter, Cantarell, sans-serif; }
   .ok .keys button:is(:hover,.hot), .keys button:is(:hover,.hot) { background:rgba(255,255,255,.08); color:#fff; transform:none; }
   .ok .keys button.go, .keys button.go { background:var(--accent); color:#fff; padding-right:5px; } .ok .keys button.go:is(:hover,.hot) { background:#0070df; }
   .ok .keys button:active { transform:scale(.97); } .keys button:disabled { opacity:.6; cursor:default; }

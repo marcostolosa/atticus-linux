@@ -266,9 +266,12 @@ def fill(n: int, text: str) -> tuple[bool, str]:
     return False, "The field would not take the text. Click it, then use --hands type."
 
 
-KEYS = {"enter": "Return", "return": "Return", "esc": "Escape", "escape": "Escape", "tab": "Tab", "space": "space", "backspace": "BackSpace",
-        "delete": "Delete", "up": "Up", "down": "Down", "left": "Left", "right": "Right", "home": "Home", "end": "End",
-        "pageup": "Prior", "pagedown": "Next", "page_up": "Prior", "page_down": "Next"}
+# Named keys are sent by key code (evdev code + 8), not by name: Hyprland looks a name up in the keymap of whichever
+# keyboard was used last, and an input method's virtual keyboard has no Return or Escape in it ("key not found").
+KEYS = {"enter": 36, "return": 36, "esc": 9, "escape": 9, "tab": 23, "space": 65, "backspace": 22, "delete": 119,
+        "up": 111, "down": 116, "left": 113, "right": 114, "home": 110, "end": 115,
+        "pageup": 112, "pagedown": 117, "page_up": 112, "page_down": 117}
+FKEYS = {f"f{n}": (66 + n if n <= 10 else 84 + n) for n in range(1, 13)}   # F1..F10 are codes 67..76, F11 95, F12 96
 MODS = {"ctrl": "CTRL", "control": "CTRL", "alt": "ALT", "shift": "SHIFT", "super": "SUPER", "meta": "SUPER", "win": "SUPER"}
 
 
@@ -280,8 +283,22 @@ def parse_combo(combo: str) -> tuple[str, str] | None:
     mods, key = [MODS[p.lower()] for p in parts[:-1] if p.lower() in MODS], parts[-1]
     if len(mods) != len(parts) - 1 or key.lower() in MODS:
         return None
-    key = KEYS.get(key.lower(), key if len(key) > 1 and key[0] == "F" and key[1:].isdigit() else key.lower() if len(key) == 1 else "")
+    code = KEYS.get(key.lower()) or FKEYS.get(key.lower())
+    key = f"code:{code}" if code else key.lower() if len(key) == 1 else ""
     return (" ".join(mods), key) if key else None
+
+
+def target_window(max_age: float = 300.0) -> dict:
+    """The window keys go to: the one last looked at with `see` while it is still open, else the one in front.
+    Focus can move while a request runs (a card, a notification); the keys still go where Atticus was working,
+    and the Allow card names that program."""
+    saved = load()
+    want = (saved.get("window") or {}).get("address")
+    if want and time.time() - float(saved.get("at") or 0) < max_age:
+        for w in windows():
+            if w.get("address") == want:
+                return w
+    return front()
 
 
 def press(combo: str, address: str, times: int = 1) -> tuple[bool, str]:

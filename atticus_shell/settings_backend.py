@@ -187,7 +187,7 @@ def initial_state() -> dict:
                   "hotkeyLabel": binds.get("talk", ""), "dictateHotkeyLabel": binds.get("dictate", ""),
                   "defaultHotkeyLabel": shortcuts.label(shortcuts.DEFAULTS["talk"]), "canHold": shortcuts.can_hold()},
         "routines": brain_json("--routine-list") or [],
-        "icon": str(icon_path) if icon_path.exists() else "",
+        "icon": icon_path.as_uri() if icon_path.exists() else "",
         "version": version,
         "managedUpdates": True,     # no in-app updater here: updates come from re-running build.sh
         "update": "Updates are applied by re-running the installer (build.sh), not checked automatically.",

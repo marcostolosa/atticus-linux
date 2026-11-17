@@ -239,7 +239,7 @@ def hands_main(argv: list[str]) -> int:
         if what in ("click", "fill") and len(rest) > 1 and rest[1].isdigit():
             print(_json.dumps(atspi.describe(int(rest[1]))))
         else:
-            win = atspi.front()
+            win = atspi.target_window() if what == "press" else atspi.front()   # typing goes to the focused window, keys to the one looked at
             cls = str(win.get("class", "")).lower()
             print(_json.dumps({"app": atspi.clean(win.get("class", ""), 40), "title": atspi.clean(win.get("title", ""), 60), "terminal": cls in atspi.TERMINALS}))
         return 0
@@ -257,7 +257,7 @@ def hands_main(argv: list[str]) -> int:
         if not rest:
             return 1
         times = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 1
-        win = atspi.front()
+        win = atspi.target_window()
         ok, msg = atspi.press(rest[0], str(win.get("address", "")), times)
         if not ok and msg:
             print(msg)

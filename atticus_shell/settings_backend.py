@@ -79,8 +79,8 @@ def speech_ok() -> bool:
 
 
 def input_ok() -> bool:
-    from . import hands
-    return hands.available()
+    from . import atspi
+    return atspi.available()
 
 
 def screen_ok() -> bool:
@@ -89,8 +89,7 @@ def screen_ok() -> bool:
 
 PERM_CHECKS = {"mic": mic_ok, "speech": speech_ok, "ax": input_ok, "screen": screen_ok}
 PERM_FIX = {
-    "ax": "To click, type and move windows, ydotool needs to be set up: install ydotool, add this "
-          "user to the input group, and enable the ydotoold service — see the README.",
+    "ax": "Clicking programs by name needs the accessibility libraries: install at-spi2-core and python-gobject.",
     "screen": "Install grim and slurp to let Atticus see the screen.",
     "mic": "No way to record audio was found. Install pipewire-pulse (parecord) or alsa-utils (arecord).",
     "speech": "faster-whisper is not installed in Atticus's own virtual environment; re-run build.sh.",
@@ -128,7 +127,7 @@ def set_microphone(uid: str) -> None:
 
 
 def hyprland_binds() -> dict[str, str]:
-    """The talk and dictation shortcuts as the pages show them ("Super+Alt+A")."""
+    """The talk and dictation shortcuts as the pages show them ("Ctrl+Alt+Space")."""
     return shortcuts.labels()
 
 
@@ -298,7 +297,7 @@ def dispatch(body: dict) -> Optional[tuple[str, Any]]:
         if kind in PERM_CHECKS:
             return ("perms", perms_payload()) if PERM_CHECKS[kind]() else ("notice", {"text": PERM_FIX[kind]})
         return "notice", {"text": "There is no per-app permission to grant here: Keyboard and Mouse, "
-                                  "above, covers every app ydotool can reach."}
+                                  "above, covers every program that publishes its controls."}
     if do in ("allow", "stopAllow", "enableAll"):
         return "notice", {"text": "Background agents need no per-app permission on this desktop: what a task may do is asked on its own card."}
     if do == "automation":

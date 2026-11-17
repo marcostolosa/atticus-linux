@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ME = os.path.join(ROOT, "atticus.py")
@@ -176,3 +177,38 @@ class OneDesktop(unittest.TestCase):
         from undefined_names import undefined
         with open(ME) as f:
             self.assertEqual(undefined(f.read()), [])
+
+
+class HandsCards(unittest.TestCase):
+    """The Allow card for a click is built from the control the helper read, never from what the model wrote."""
+    @classmethod
+    def setUpClass(cls):
+        cls.brain = load()
+
+    def run_click(self, described, said):
+        asked = []
+        b = self.brain
+        with mock.patch.object(b, "hands_json", lambda *a: described), mock.patch.object(b, "wait_commit", lambda: True), \
+                mock.patch.object(b, "pref", lambda k, d=None: {"safe": True, "asrLanguage": "en"}.get(k, d)), \
+                mock.patch.object(b, "task_allowed", lambda *a: False), mock.patch.object(b, "managed_agent", lambda: False), \
+                mock.patch.dict(os.environ, {"ATTICUS_ASK": "x"}), \
+                mock.patch.object(b, "ask_user", lambda q, t: asked.append(q) or "n"):
+            out = b.hands_linux("click", "3", *said)
+        return asked, out
+
+    def test_card_names_the_control_not_the_models_words(self):
+        asked, out = self.run_click({"kind": "button", "name": "Delete account", "app": "firefox", "title": "x"}, [])
+        self.assertEqual(asked[0]["q"], "Click “Delete account” (button) in firefox?")
+        self.assertFalse(out[1])
+
+    def test_extra_words_from_the_model_never_reach_the_card(self):
+        asked, _ = self.run_click({"kind": "button", "name": "Delete account", "app": "firefox"}, ["a harmless Like button"])
+        self.assertNotIn("harmless", json.dumps(asked))
+
+    def test_a_stale_look_asks_nothing(self):
+        asked, out = self.run_click({"error": "The window changed since it was read."}, [])
+        self.assertEqual((asked, out[1]), ([], False))
+
+
+if __name__ == "__main__":
+    unittest.main()

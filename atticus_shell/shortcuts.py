@@ -5,8 +5,8 @@ socket, and a line in ~/.config/hypr/bindings.lua runs `atticus-ctl <command>`
 when the keys are pressed. This module reads those lines and rewrites them
 when the Settings window records new keys:
 
-    o.bind("SUPER + ALT + A", "Atticus (voice)", "~/.local/bin/atticus-ctl toggle")
-    o.bind_hold("SUPER + ALT + A", "Atticus (voice)", "… press", "Atticus (send)", "… release")
+    o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "~/.local/bin/atticus-ctl toggle")
+    o.bind_hold("CTRL + ALT + SPACE", "Atticus (voice)", "… press", "Atticus (send)", "… release")
 
 A write is checked: Hyprland reloads, and if it reports a config error the
 file goes back to what it was.
@@ -20,7 +20,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-DEFAULTS = {"talk": "SUPER + ALT + A", "dictate": "SUPER + ALT + D", "settings": "SUPER + CTRL + ALT + A"}
+DEFAULTS = {"talk": "CTRL + ALT + SPACE", "dictate": "CTRL + ALT + D", "settings": "CTRL + ALT + COMMA"}
 NAMES = {"talk": "Atticus (voice)", "dictate": "Atticus dictation", "settings": "Atticus settings",
          "meeting": "Atticus meeting", "move": "Atticus to background"}
 # which shortcut a bound `atticus-ctl <command>` is
@@ -39,7 +39,7 @@ def ctl() -> str:
 
 
 def clean(keys: str) -> str:
-    """'super+alt + a' -> 'SUPER + ALT + A', modifiers first and in one order; '' when it is no shortcut."""
+    """'ctrl+alt + space' -> 'CTRL + ALT + SPACE', modifiers first and in one order; '' when it is no shortcut."""
     parts = [p.strip().upper() for p in re.split(r"\s*\+\s*", keys.strip()) if p.strip()]
     names = {"CONTROL": "CTRL", "META": "SUPER", "WIN": "SUPER", "MOD4": "SUPER"}
     parts = [names.get(p, p) for p in parts]
@@ -53,7 +53,7 @@ def clean(keys: str) -> str:
 
 
 def label(keys: str) -> str:
-    """'SUPER + ALT + A' -> 'Super+Alt+A', what the pages show as key caps."""
+    """'CTRL + ALT + SPACE' -> 'Ctrl+Alt+Space', what the pages show as key caps."""
     words = {"SUPER": "Super", "CTRL": "Ctrl", "ALT": "Alt", "SHIFT": "Shift", "SPACE": "Space", "RETURN": "Enter",
              "COMMA": ",", "PERIOD": ".", "SLASH": "/", "ESCAPE": "Esc"}
     return "+".join(words.get(p, p if len(p) < 4 else p.capitalize()) for p in keys.split(" + ") if p)
@@ -73,7 +73,7 @@ def _rows(text: str) -> list[tuple[int, str, str, bool]]:
 
 
 def read() -> dict:
-    """{'talk': 'SUPER + ALT + A', 'dictate': …, 'hold': bool} from the bindings file."""
+    """{'talk': 'CTRL + ALT + SPACE', 'dictate': …, 'hold': bool} from the bindings file."""
     try:
         rows = _rows(path().read_text())
     except OSError:

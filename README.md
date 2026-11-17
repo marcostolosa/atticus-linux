@@ -97,9 +97,9 @@ already does something on your desktop is left alone and reported):
 
 | Keys | What |
 | --- | --- |
-| `Super+Alt+A` | Talk: press, speak, press again to send |
-| `Super+Alt+D` | Dictation |
-| `Super+Ctrl+Alt+A` | Settings |
+| `Ctrl+Alt+Space` | Talk: press, speak, press again to send |
+| `Ctrl+Alt+D` | Dictation |
+| `Ctrl+Alt+Comma` | Settings |
 
 Change them in Settings → General → Change Shortcut: press the new keys and
 the line in `bindings.lua` is rewritten and Hyprland reloaded. If Hyprland
@@ -118,14 +118,36 @@ Settings → General also picks the speech model that runs on this computer
 (Tiny to Large v3 Turbo), downloads it, and deletes the ones you no longer
 want.
 
-Native click and typing need `ydotool`, which only works once your user is in
-the `input` group — `build.sh` adds you to it, but that takes effect on your
-**next login**, not this session. Log out and back in once after the first
-install.
+### Clicking and typing, and what keeps it safe
+
+Atticus uses programs by the names of their own controls, through the
+accessibility bus (AT-SPI): `--hands see` lists a window's controls as
+`[3] button "Send"`, `click 3` makes the program run that control's action,
+`fill 4 "text"` fills that one field. Keys go to one window through Hyprland,
+and text is typed with `wtype`. Nothing is sent to the keyboard or mouse at the
+kernel level, so Atticus needs no access to `/dev/input` or `/dev/uinput` and
+your user does not have to be in the `input` group.
+
+- The Allow card for a click or key press is built from what Atticus read from
+  the control itself (its name, its kind, the program), never from the
+  model's description: text on a web page or in a document can be written by
+  an attacker.
+- A number only works for the look that produced it. The control is found again
+  and must have the same name, or nothing is done.
+- Typing into a terminal asks first, showing the exact text.
+- Password fields are never filled.
+- Programs only publish their controls when accessibility is on; Atticus turns
+  it on when it starts. A program that was already open may need a restart, and
+  Electron or Chromium apps may need `--force-renderer-accessibility`.
+
+Raw mouse and keyboard input by screen position (`ydotool`, which needs the
+`input` group) is off. Turn it on with `"rawInput": true` in `settings.json`
+only if you accept that: anything that reaches that daemon can type into any
+window.
 
 ## Usage
 
-Press `Super+Alt+A`, speak, then press again to send. The answer streams into
+Press `Ctrl+Alt+Space`, speak, then press again to send. The answer streams into
 the panel and is read aloud.
 
 Close the panel with its `X` button, with `Esc` (click the panel first), or let
@@ -151,6 +173,7 @@ Settings live in `~/.config/atticus/settings.json`. Common keys:
 | `sounds` | `true` | Play the start and stop chimes. |
 | `wake` | `false` | Enable the always-on wake word. |
 | `wakeWord` | `"siri"` | The word that starts listening. |
+| `rawInput` | `false` | Allow clicks, drags and scrolls by screen position through `ydotool` (needs it installed and your user in the `input` group). Off by default: controls are used by name. |
 | `asrModel` | `"small"` | Whisper model. `"base"` answers about 2 s sooner on a laptop CPU but mishears more. |
 | `sttRemote` | `"auto"` | Use the Home Assistant server's Whisper service for speech recognition when `haUrl`/`haToken` are set (usually a larger model on a stronger machine: faster and far better with whispers). Falls back to the local model. `"off"` keeps it local. |
 | `sttEntity` | auto | Which `stt.*` entity to use on that server. |
@@ -237,7 +260,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Dictation
 
-Say it and it is typed where the cursor is, in any app. Press `Super+Alt+D`
+Say it and it is typed where the cursor is, in any app. Press `Ctrl+Alt+D`
 to start and again to finish; a pause of a couple of seconds finishes it too.
 The keys run `atticus-ctl dictate`.
 
@@ -245,7 +268,7 @@ For hold-to-dictate instead, bind the key's press and release yourself in
 `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind_hold("SUPER + ALT + D", "Dictate", "atticus-ctl dictate-press", "Dictate (done)", "atticus-ctl dictate-release")
+o.bind_hold("CTRL + ALT + D", "Dictate", "atticus-ctl dictate-press", "Dictate (done)", "atticus-ctl dictate-release")
 ```
 
 The words are tidied first (punctuation, names, false starts). One line is

@@ -594,7 +594,7 @@
   let connected = false;   // Enable All opens claude.ai's connectors page only when none is connected
   document.getElementById('enableAll').onclick = () => post({ do: 'enableAll', connected: String(connected) });
 
-  // Shortcut: the label is like "Super+Alt+A", one key cap per part
+  // Shortcut: the label is like "Ctrl+Alt+Space", one key cap per part
   const capsOf = label => label ? label.split('+').map(c => c || '+') : [];
   const showCaps = (label, hint) => $('caps').innerHTML = capsOf(label).map(c => `<i class="cap${c === 'Space' ? ' wide' : ''}">${c}</i>`).join('')
     + (hint ? `<span class="hint">${hint}</span>` : '');

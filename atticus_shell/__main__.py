@@ -170,6 +170,8 @@ def main():
             from .overlay import _ui_language
             self.drawing = ScreenDrawing(app, speak=self._speak_step, language=_ui_language)
             self.transcriber.warm()
+            from . import atspi
+            threading.Thread(target=atspi.enable, daemon=True).start()   # programs publish their controls only once this is on
             self.speaker.warm()
             self._show_models()
             if cfg.get("bargeIn", True):

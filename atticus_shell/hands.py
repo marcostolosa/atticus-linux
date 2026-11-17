@@ -1,22 +1,19 @@
-"""Native UI automation for the brain's --hands tool: click, type, press a
-key combo, scroll and drag, all by pixel coordinate on a Wayland/Hyprland
-desktop, plus window placement.
+"""Raw input by screen position, and window placement. Opt-in.
 
-This is coordinate-driven, not label/accessibility-tree driven. AT-SPI
-support is inconsistent across GTK, Qt, Electron and terminal apps on this
-stack (and isn't guaranteed to be running at all under Hyprland), so instead
-this reuses the pattern the brain already has for "click where you see it":
-{LOOK} gives it a real screenshot, it reads pixel coordinates off that
-picture, and these functions act on exactly those coordinates. That mirrors
-the existing Pointer feature ([point N X Y]), just driving real input instead
-of drawing a ring.
+Clicking and typing by control name is atticus_shell/atspi.py. This module is
+the position-driven fallback: click, drag and scroll at a pixel, through
+ydotool (uinput), reachable only when the setting `rawInput` is true. It is
+off by default because uinput types into any window and needs the user in the
+`input` group, and a picture of the screen is easier to mislead than a
+control's own name.
 
-Input is synthesized with ydotool (uinput), which needs:
+Window placement (`place`) and text insertion (`insert_text`, wtype) do not
+use uinput and are always available.
+
+ydotool, when used, needs:
   - the `ydotool`/`ydotoold` package installed
   - ydotoold running as the same user Atticus runs as (a systemd --user
-    service is the standard setup; see build.sh), which needs that user in
-    the `input` group (udev rule shipped by the ydotool package) — group
-    membership only takes effect after the next login
+    service), which needs that user in the `input` group
 Every function here degrades to a clear (ok=False) failure, never an
 exception, so the brain can say what didn't work instead of hanging.
 """

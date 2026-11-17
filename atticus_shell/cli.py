@@ -212,20 +212,64 @@ def text_ocr(app: str, title: str = "") -> int:
 
 
 def hands_main(argv: list[str]) -> int:
-    """--hands <verb> ...: native click/type/key/scroll/placement, backed by
-    ydotool and Hyprland's dispatchers (see atticus_shell/hands.py). Prints
-    nothing on success; an error line on failure, which the brain's own
-    hands() reads and relays instead of claiming the action worked."""
-    from . import hands
+    """--hands <verb> ...: acting on the desktop. Controls are looked at and
+    used by name through the accessibility bus (atticus_shell/atspi.py), keys
+    go to one window through Hyprland, text through wtype. Raw mouse and
+    keyboard input (ydotool, uinput) is off unless the setting `rawInput` is
+    true. Prints nothing on success; an error line on failure, which the
+    brain's own hands() reads and relays instead of claiming it worked."""
+    import json as _json
+    from . import atspi, hands, settings
     if not argv:
         return 1
     verb, rest = argv[0], argv[1:]
+    raw = bool(settings.get("rawInput", False))
+    if verb == "see":
+        win = atspi.find_window(rest[0] if rest else "", " ".join(rest[1:]))
+        if not win:
+            print("There is no such window.")
+            return 1
+        rows, note = atspi.snapshot(win)
+        atspi.save(win, rows)
+        head = f'{win.get("class", "")} - {atspi.clean(win.get("title", ""), 80)}'
+        print("\n".join(x for x in (head, atspi.lines(rows), note) if x))
+        return 0 if rows else 1
+    if verb == "describe":   # what the Allow card says, read from the program itself: {} fields, or {"error": ...}
+        what = rest[0] if rest else ""
+        if what in ("click", "fill") and len(rest) > 1 and rest[1].isdigit():
+            print(_json.dumps(atspi.describe(int(rest[1]))))
+        else:
+            win = atspi.front()
+            cls = str(win.get("class", "")).lower()
+            print(_json.dumps({"app": atspi.clean(win.get("class", ""), 40), "title": atspi.clean(win.get("title", ""), 60), "terminal": cls in atspi.TERMINALS}))
+        return 0
+    if verb == "click" and len(rest) == 1 and rest[0].isdigit():
+        ok, msg = atspi.click(int(rest[0]))
+        if not ok and msg:
+            print(msg)
+        return 0 if ok else 1
+    if verb == "fill" and len(rest) >= 2 and rest[0].isdigit():
+        ok, msg = atspi.fill(int(rest[0]), " ".join(rest[1:]))
+        if not ok and msg:
+            print(msg)
+        return 0 if ok else 1
+    if verb == "press" and not raw:
+        if not rest:
+            return 1
+        times = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 1
+        win = atspi.front()
+        ok, msg = atspi.press(rest[0], str(win.get("address", "")), times)
+        if not ok and msg:
+            print(msg)
+        return 0 if ok else 1
+    if verb in ("click", "scroll", "drag", "press") and not raw:
+        print("Mouse input by position is off. Look with --hands see, then use --hands click <number>; scroll with press PageDown.")
+        return 1
     if verb == "type" and not hands.type_available():
-        print("neither wtype nor ydotool is set up for typing")
+        print("wtype is not installed")
         return 1
     if verb in ("click", "press", "scroll", "drag") and not hands.available():
-        print("ydotool is not set up (install ydotool, enable the ydotool "
-              "user service, and make sure this user is in the input group)")
+        print("ydotool is not set up")
         return 1
     if verb == "click":
         if len(rest) < 2:

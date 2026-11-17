@@ -4,8 +4,8 @@ A global key belongs to the compositor, so a Hyprland bind runs a command.
 Atticus runs a small Unix-socket server and the binds send one-word commands
 to it (shortcuts.py writes these lines):
 
-    o.bind("SUPER + ALT + A", "Atticus (voice)", "atticus-ctl toggle")
-    o.bind_hold("SUPER + ALT + A", "Atticus (voice)", "atticus-ctl press", "Atticus (send)", "atticus-ctl release")
+    o.bind("CTRL + ALT + SPACE", "Atticus (voice)", "atticus-ctl toggle")
+    o.bind_hold("CTRL + ALT + SPACE", "Atticus (voice)", "atticus-ctl press", "Atticus (send)", "atticus-ctl release")
 
 The second form is hold-to-talk. Commands:
     press | release | toggle | cancel | ask <text> | ping

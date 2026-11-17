@@ -12,10 +12,11 @@ Two kinds of guide, as the brain marks them:
              the user clicks inside its place, and the guide leaves when a
              step's time runs out
 
-A click is seen by reading the mouse buttons from /dev/input (the user is in
-the `input` group on this desktop, which ydotool needs anyway). The layer
+A click is seen by reading the mouse buttons from /dev/input, which needs the
+user to be in the `input` group (Atticus does not ask for it). The layer
 itself cannot see it: a surface that takes the click would also keep it from
-the application underneath. Without that access the Next button still works.
+the application underneath. Without that access the Next button, or saying
+"next", moves the guide on.
 
 Coordinates are the desktop's own (logical pixels, origin at the top-left of
 the layout), the same ones `hyprctl monitors` and the brain's screens() use.

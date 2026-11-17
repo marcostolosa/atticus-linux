@@ -21,7 +21,6 @@ pkg_for() { case "$1" in
   ffmpeg) echo "ffmpeg";;
   fd) echo "fd";;
   rg) echo "ripgrep";;
-  ydotool) echo "ydotool";;
   playerctl) echo "playerctl";;
   bwrap) echo "bubblewrap";;
   wtype) echo "wtype";;
@@ -31,15 +30,15 @@ pkg_for() { case "$1" in
   gio) echo "glib2";;
   *) echo "$1";;
 esac; }
-# fd/rg back the file-search tool; ydotool/playerctl back native click/type
-# and media control — all optional in the sense that Atticus still runs and
+# fd/rg back the file-search tool; wtype types text; playerctl backs
+# media control — all optional in the sense that Atticus still runs and
 # talks without them, just with those specific abilities missing.
 # bwrap is the sandbox every unlisted shell command runs in; without it each
 # of those asks for an Allow card instead. wtype types text with the real
 # keyboard layout; notify-send/wpctl/brightnessctl back alarms and controls.
 # mpv and yt-dlp play music by name when Spotify is not installed; gio moves
 # files to the trash.
-for t in grim slurp wl-copy tesseract ffmpeg fd rg ydotool playerctl bwrap wtype notify-send wpctl brightnessctl mpv yt-dlp gio; do
+for t in grim slurp wl-copy tesseract ffmpeg fd rg playerctl bwrap wtype notify-send wpctl brightnessctl mpv yt-dlp gio; do
   command -v "$t" >/dev/null || need_sys+=("$(pkg_for "$t")")
 done
 command -v brave >/dev/null || command -v chromium >/dev/null || command -v google-chrome-stable >/dev/null \
@@ -99,23 +98,12 @@ echo "Installed launchers: $BIN/atticus, $BIN/atticus-ctl (v$VERSION)"
 
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "Note: add $BIN to PATH.";; esac
 
-# --- ydotool (native click/type) --------------------------------------------
-# Needs the user in the `input` group (ydotool's own udev rule grants that
-# group access to /dev/uinput) and its daemon running as this user, not root.
-# Group membership only takes effect on the next login, so this can enable
-# the service now but can't make clicking/typing work in THIS session.
-if command -v ydotool >/dev/null && command -v systemctl >/dev/null; then
-  if ! id -nG "$USER" | grep -qw input; then
-    echo "Note: adding $USER to the 'input' group (needed for click/type)."
-    sudo usermod -aG input "$USER" 2>/dev/null \
-      && echo "Done. Log out and back in once for it to take effect." \
-      || echo "Could not add $USER to 'input' automatically: run 'sudo usermod -aG input $USER' yourself, then log out and back in."
-  fi
-  systemctl --user daemon-reload 2>/dev/null || true
-  systemctl --user enable --now ydotool.service 2>/dev/null \
-    && echo "ydotool service enabled: systemctl --user status ydotool" \
-    || echo "ydotool service installed; it will start once the input group change above takes effect."
-fi
+# --- clicking and typing ----------------------------------------------------
+# Programs are used by the names of their own controls through the
+# accessibility bus (AT-SPI), and keys go to one window through Hyprland, so
+# nothing here needs the `input` group or /dev/uinput. Atticus switches
+# accessibility on itself when it starts. Raw mouse input by position
+# (ydotool) is an opt-in: set "rawInput": true and install ydotool yourself.
 
 # --- systemd user service --------------------------------------------------
 # A user service (never system/root): it needs the Wayland session, mic and

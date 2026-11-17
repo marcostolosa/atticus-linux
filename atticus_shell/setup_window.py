@@ -2,7 +2,7 @@
 
 It hosts ui/onboarding.html the way the Settings window hosts its page, and
 answers it with the same checks (settings_backend): is there a way to record,
-a recognizer, ydotool for the mouse and keyboard, grim for the screen, and is
+a recognizer, the accessibility bus for clicking programs, grim for the screen, and is
 the AI client installed and signed in. Nothing here is a permission the system
 grants: each row is something installed or not, so a row's button says what
 is missing, in a notification, instead of opening a system pane.

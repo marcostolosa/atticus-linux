@@ -83,9 +83,9 @@ class ShortcutsTest(unittest.TestCase):
     def test_remove_and_add(self):
         self.assertEqual(shortcuts.write("dictate", None), "")
         self.assertNotIn("dictate", self.file.read_text())
-        self.assertEqual(shortcuts.write("settings", "SUPER + CTRL + ALT + A"), "")
-        self.assertTrue(self.file.read_text().endswith('o.bind("SUPER + CTRL + ALT + A", "Atticus settings", "/bin/atticus-ctl settings")\n'))
-        self.assertEqual(shortcuts.install(), ["Atticus (voice): Super+Alt+A", "Atticus dictation: Super+Alt+D", "Atticus settings: Super+Ctrl+Alt+A"])
+        self.assertEqual(shortcuts.write("settings", "CTRL + ALT + COMMA"), "")
+        self.assertTrue(self.file.read_text().endswith('o.bind("CTRL + ALT + COMMA", "Atticus settings", "/bin/atticus-ctl settings")\n'))
+        self.assertEqual(shortcuts.install(), ["Atticus (voice): Super+Alt+A", "Atticus dictation: Ctrl+Alt+D", "Atticus settings: Ctrl+Alt+,"])
 
     def test_no_file(self):
         self.file.unlink()

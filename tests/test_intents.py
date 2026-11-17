@@ -233,6 +233,17 @@ class Phrasing(unittest.TestCase):
         self.assertEqual(p("coloca um timer de 5 minutos").lang, "pt")
 
 
+class TimeQuestions(unittest.TestCase):
+    def test_short_forms_are_answered_without_the_model(self):
+        for text in ("Que horas?", "que horas", "qual a hora", "qual é a hora?", "me fala as horas", "hora certa",
+                     "what time is it please", "que horas são agora por favor"):
+            self.assertEqual(getattr(I.parse(text, NOW), "kind", None), "time", text)
+
+    def test_other_questions_about_hours_still_go_to_the_model(self):
+        for text in ("que horas são em Tóquio", "horas de dormir", "tem horas livres amanhã"):
+            self.assertIsNone(I.parse(text, NOW), text)
+
+
 if __name__ == "__main__":
     unittest.main()
 

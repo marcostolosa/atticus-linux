@@ -303,8 +303,10 @@ def parse(text: str, now: float | None = None, home: bool | None = None, device:
         return I("hush")
 
     # --- time and date ---
-    if re.fullmatch(r"(que horas sao|que hora e|que horas e|quantas horas|me diz as horas|me diga as horas|horas|"
-                    r"what time is it|what's the time|whats the time|what is the time|time)( agora| now)?", t):
+    if re.fullmatch(r"(que horas( sao| e)?|que hora e|quantas horas|qual (e )?a hora|qual hora e|"
+                    r"(me )?(diz|diga|fala|fale|fala ai|informa|informe) (as |a )?(horas?|hora certa)|(a )?hora certa|horas|"
+                    r"what time is it|what's the time|whats the time|what is the time|what time|tell me the time|time)"
+                    r"( agora| agorinha| por favor| now| please)*", t):
         return I("time")
     if re.fullmatch(r"(que dia e hoje|qual (e )?(o dia|a data) de hoje|qual e a data|que data e hoje|em que dia estamos|"
                     r"what day is it( today)?|what's the date( today)?|what is the date( today)?|what's today's date)", t):

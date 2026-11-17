@@ -467,6 +467,11 @@ def main():
             else:
                 self.wake.pause()
 
+        def _since_end(self):
+            """Seconds since the person stopped talking, for the journal: where the time went is read from these."""
+            t = getattr(self, "_t_end", 0)
+            return round(time.monotonic() - t, 2) if t else None
+
         @staticmethod
         def _log(event, **details):
             # One line per voice event in the service journal (journalctl
@@ -660,6 +665,7 @@ def main():
                 self._schedule_autohide()
                 return
             self.listening = True
+            threading.Thread(target=lambda: self.bridge.warm(self._front_app()), daemon=True).start()   # the brain starts while the person talks
             self._heard_word = bool(stream)
             self._wake_session = wake
             self._speech_seen = False
@@ -792,13 +798,16 @@ def main():
         def _watch_voice(self, since):
             """Every ~0.2 s, ask the voice detector how long ago a voice was
             last heard in the last two seconds of this recording. The first
-            0.3 s are left out: after the wake word they still hold its last
-            sound, which is not yet the request."""
+            0.3 s (0.7 s after a wake word) are left out: they still hold its
+            last sound, which is not yet the request."""
             self._vad_ticks += 1
             if self._vad_ticks % 3 or self._vad_busy:
                 return
             self._vad_busy = True
-            gen, audio = self._gen, self.recorder.tail(max(0.05, min(2.0, since - 0.3)))
+            # After the wake word the word's own last sound sits in the opening of the recording, and the detector fires
+            # a moment after it ends: a longer opening is left out, or "Siri ... (a breath) ... que horas" is cut at the breath.
+            grace = 0.7 if self._heard_word else 0.3
+            gen, audio = self._gen, self.recorder.tail(max(0.05, min(2.0, since - grace)))
 
             def check():
                 from .speech import SAMPLE_RATE, voice_ago
@@ -894,6 +903,7 @@ def main():
             if self._barge_pending:      # spoke over the answer: decide once it is transcribed
                 threading.Thread(target=self._barge_transcribe, args=(audio, gen), daemon=True).start()
                 return
+            self._t_end = time.monotonic()   # the person stopped talking: every delay is counted from here
             self.earcons.play("end")     # falling blip: "got it"
             if answering:
                 threading.Thread(target=self._transcribe_answer, args=(audio, gen),
@@ -968,7 +978,7 @@ def main():
             if gen != self._gen:
                 return False   # superseded by a newer session or a cancel; drop it
             text = (text or "").strip()
-            self._log("heard", text=text, by=self.transcriber.last_engine)
+            self._log("heard", text=text, by=self.transcriber.last_engine, after=self._since_end())
             # The big recognizer lives on another machine. When it cannot be
             # reached the small one here takes over and mishears much more:
             # the box says so once, so a bad day is not a mystery.
@@ -982,6 +992,7 @@ def main():
                 self._ask_again(gen)
                 return False
             if not text:
+                self.bridge.drop_warm()
                 if self._retry:
                     # Second try and still nothing: give up, with a sound
                     # that says so. The user calls again when they want.
@@ -1008,7 +1019,7 @@ def main():
             self._speaking = True
             self._speak_gen = self._gen   # tag this playback to the current turn
             self._last_answer = text
-            self._log("answer", text=text[:200])
+            self._log("answer", text=text[:200], after=self._since_end())
             self._speaking_text = text
             self.speaker.speak(text, self.transcriber.last_language,
                                done=self._on_speech_done)
@@ -1120,8 +1131,10 @@ def main():
                 except Exception:
                     import traceback
                     traceback.print_exc()
+            self._log("route", via="model" if intent is None else "instant:" + intent.kind, after=self._since_end())
             if intent is None:
                 return self._ask_brain(text)
+            self.bridge.drop_warm()
             gen = self._gen
 
             def work():
@@ -1167,6 +1180,7 @@ def main():
             self._wake_during(False)   # saying the word stops the thinking too
 
         def _cancel(self):
+            self.bridge.drop_warm()
             self._gen += 1   # invalidate any transcription still in flight
             self._barge_pending = None
             self._dictating = False

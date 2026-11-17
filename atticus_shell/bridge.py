@@ -87,6 +87,8 @@ class Bridge:
         self.on_prompt = on_prompt or (lambda kind, data: None)
         self.proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        self._warm: Optional[subprocess.Popen] = None   # a brain started while the person is still talking
+        self._warm_timer: Optional[threading.Timer] = None
         # Answer files for the card currently shown, so the shell can write the
         # user's choice back to the waiting brain tool (click or voice).
         self.pending_pick: Optional[str] = None            # answer-file path
@@ -94,19 +96,70 @@ class Bridge:
         self.pick_options: list = []                       # labels, for voice matching
 
     # --- public -------------------------------------------------------------
+    WARM_SECONDS = 45   # a brain waiting this long for a request that never came is stopped
+
+    def warm(self, front_app: str = ""):
+        """Start the brain now, while the person is still talking: its imports, the model client's start-up and the
+        read of the window in front all happen during the speech instead of after it (measured: about a second
+        and a half of the 3 s a question took). The request is handed over by ask(); drop_warm() stops it unused."""
+        self.drop_warm()
+        env = _brain_env()
+        if front_app:
+            env["ATTICUS_FRONT"] = front_app
+        try:
+            p = subprocess.Popen([sys.executable, str(ATTICUS_PY), "--wait"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, bufsize=1, env=env, cwd=str(RES))
+        except OSError:
+            return
+        timer = threading.Timer(self.WARM_SECONDS, self.drop_warm)
+        timer.daemon = True
+        with self._lock:
+            self._warm, self._warm_timer = p, timer
+        timer.start()
+
+    def drop_warm(self):
+        with self._lock:
+            p, t, self._warm, self._warm_timer = self._warm, self._warm_timer, None, None
+        if t:
+            t.cancel()
+        if p and p.poll() is None:
+            try:
+                p.stdin.close()
+                p.terminate()
+            except Exception:
+                pass
+
+    def _take_warm(self) -> Optional[subprocess.Popen]:
+        with self._lock:
+            p, t, self._warm, self._warm_timer = self._warm, self._warm_timer, None, None
+        if t:
+            t.cancel()
+        return p if p is not None and p.poll() is None else None
+
     def ask(self, task: str, front_app: str = ""):
         """Start a new ask. Cancels any in-flight one."""
         task = (task or "").strip()
         if not task:
             return
         self.cancel()
-        env = _brain_env()
-        if front_app:
-            env["ATTICUS_FRONT"] = front_app
-        cmd = [sys.executable, str(ATTICUS_PY), task]
-        self.proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1, env=env, cwd=str(RES))
+        warm = self._take_warm()
+        if warm is not None:
+            try:   # "<program in front>\t<request>" on one line, which is what the waiting brain reads
+                warm.stdin.write(f"{front_app}\t{' '.join(task.split())}\n")
+                warm.stdin.flush()
+                warm.stdin.close()
+                self.proc = warm
+            except (OSError, ValueError):
+                warm.kill()
+                warm = None
+        if warm is None:
+            env = _brain_env()
+            if front_app:
+                env["ATTICUS_FRONT"] = front_app
+            cmd = [sys.executable, str(ATTICUS_PY), task]
+            self.proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1, env=env, cwd=str(RES))
         threading.Thread(target=self._pump, args=(self.proc,), daemon=True).start()
         threading.Thread(target=self._drain_err, args=(self.proc,), daemon=True).start()
 

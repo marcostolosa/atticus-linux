@@ -136,6 +136,7 @@ def main():
             self._vad = True
             self._vad_ticks = 0
             self._vad_busy = False
+            self._spec = None            # reading started at a short pause (see _speculate)
             self._heard_word = False     # this recording starts with the wake word itself
             self._about_device = False   # the last thing done or asked was about a smart-home device
             self._retry = False          # this recording is the second try after "não entendi"
@@ -669,6 +670,7 @@ def main():
             self._heard_word = bool(stream)
             self._wake_session = wake
             self._speech_seen = False
+            self._spec = None
             self._silence_since = 0.0
             self._floor = None
             self._vad_ticks, self._vad_busy = 0, False
@@ -801,7 +803,7 @@ def main():
             0.3 s (0.7 s after a wake word) are left out: they still hold its
             last sound, which is not yet the request."""
             self._vad_ticks += 1
-            if self._vad_ticks % 3 or self._vad_busy:
+            if self._vad_busy:      # one detector pass is ~5 ms (measured), so every tick can afford to ask
                 return
             self._vad_busy = True
             # After the wake word the word's own last sound sits in the opening of the recording, and the detector fires
@@ -831,11 +833,48 @@ def main():
             # the speech is being held meanwhile: a shorter pause ends it.
             limit = (0.6 if self._barge_pending else float(cfg.get("dictateSilence", 2.5)) if self._dictating
                      else float(cfg.get("endSilence", 0.9) or 0.9))   # dictating, people stop to think
+            self._speculate(gen, ago, limit)
             if self._speech_seen and ago >= limit:
                 if os.environ.get("ATTICUS_DEBUG"):
                     print(f"[listen] endpoint: no voice for {ago:.2f} s", flush=True)
                 self._end_listen()
             return False
+
+        def _speculate(self, gen, ago, limit):
+            """Start reading the words at a short pause, before the long pause that
+            ends the request is over. Most pauses of this length do end it, and
+            then the answer is ready that much sooner; when the voice comes back
+            the reading is thrown away. Two end-of-speech points, a quick one that
+            only starts work and a slow one that decides, is how a smart speaker
+            hides its recognition time too."""
+            spec = self._spec
+            if spec and ago < 0.3:      # the voice is back: that reading is of half a sentence
+                spec["stale"] = True
+                self._spec = None
+                return
+            quick = float(cfg.get("specSilence", 0.4))
+            if (spec or not self._speech_seen or ago < quick or ago >= limit or limit <= quick
+                    or not cfg.get("speculate", True) or self._dictating or self._barge_pending or self._answering):
+                return
+            audio = self.recorder.tail(600)
+            spec = self._spec = {"gen": gen, "stale": False, "text": None, "done": threading.Event(), "at": time.monotonic()}
+
+            def read():
+                try:
+                    spec["text"] = self.transcriber.transcribe(audio)
+                except Exception:
+                    spec["text"] = None
+                spec["done"].set()
+            threading.Thread(target=read, daemon=True).start()
+
+        def _transcribe_first(self, audio, gen):
+            """The words of the recording: the reading started at the short pause
+            when the voice never came back, else a fresh one."""
+            spec, self._spec = self._spec, None
+            if spec and spec["gen"] == gen and not spec["stale"] and spec["done"].wait(10) and spec["text"] is not None:
+                self._log("speculative reading used", head=round(self._since_end() or 0, 2))
+                return spec["text"]
+            return self.transcriber.transcribe(audio)
 
         def _loudness_says_done(self, level, now):
             # Adaptive noise floor: track the quietest level, creep up slowly.
@@ -922,7 +961,7 @@ def main():
                     if 0 <= secs < 0.25:
                         self._log("follow-up dropped: no voice in it")
                         audio = None
-                text = self.transcriber.transcribe(audio) if audio is not None else ""
+                text = self._transcribe_first(audio, gen) if audio is not None else ""
                 heard_voice = False
                 if word and text:
                     # The recording began with the wake word, which helps a
